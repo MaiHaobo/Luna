@@ -1,0 +1,294 @@
+name: Build unsigned IPA
+
+# Luna cannot be signed by this workflow, and it does not need to be. What CI
+# produces is an *unsigned* .ipa: the exact same binary Xcode would build, minus
+# the signature block. The user's sideloading tool (SideStore, AltStore,
+# Sideloadly, TrollStore, or a paid certificate) applies the signature on their
+# own device, with their own identity. That is the only model that works here —
+# an Apple-issued provisioning profile cannot be granted the entitlements Luna
+# needs for the runtime loader anyway.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: Build configuration
+        required: true
+        default: Release
+        type: choice
+        options: [Release, Debug]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Luna (unsigned)
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Xcode 16.x on macOS 15 is the combination we target. Pinning the major
+      # version keeps the Swift compiler from drifting under us; a floating
+      # "latest" would silently change codegen between runs.
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          echo "Installed Xcode versions:"
+          ls -1 /Applications | grep -i '^Xcode' || true
+          LATEST=$(ls -1d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1 || true)
+          if [ -z "$LATEST" ]; then
+            LATEST=$(ls -1d /Applications/Xcode*.app | sort -V | tail -1)
+          fi
+          echo "Selecting $LATEST"
+          sudo xcode-select -switch "$LATEST/Contents/Developer"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      # ── Static checks ─────────────────────────────────────────────────────
+      # These run before the expensive build so a broken project file or a
+      # stray credential fails in seconds rather than after a full compile.
+
+      - name: Validate project structure
+        run: |
+          set -euo pipefail
+          test -f Luna.xcodeproj/project.pbxproj || { echo "missing project.pbxproj"; exit 1; }
+          test -f Luna/Info.plist               || { echo "missing Info.plist"; exit 1; }
+          test -f Luna/Luna.entitlements        || { echo "missing entitlements"; exit 1; }
+          test -f Luna.xcodeproj/xcshareddata/xcschemes/Luna.xcscheme \
+            || { echo "missing shared scheme"; exit 1; }
+          echo "project structure OK"
+
+      - name: Swift structural check
+        run: |
+          set -euo pipefail
+          # Catches unbalanced braces, unterminated literals, duplicate type
+          # declarations and stale private helpers. Not a compiler — but it
+          # runs in a second and catches the mistakes that cost a full build.
+          python3 tools/swift_sanity.py Luna
+
+      - name: Mach-O algorithm tests
+        run: |
+          set -euo pipefail
+          # Builds a synthetic arm64 Mach-O, runs the three-edit patch
+          # algorithm against it, and asserts the resulting bytes: filetype,
+          # __PAGEZERO values, ncmds/sizeofcmds bookkeeping, command alignment,
+          # zero-padding discovery, and the no-room error path.
+          python3 tools/test_macho_logic.py
+
+      - name: Verify every Swift file is in the Sources phase
+        run: |
+          set -euo pipefail
+          # A Swift file that exists on disk but is not referenced by the
+          # project compiles to nothing and fails only at runtime — the worst
+          # possible failure mode. Catch it here.
+          MISSING=0
+          while IFS= read -r file; do
+            base=$(basename "$file")
+            if ! grep -qF "/* ${base} in Sources */" Luna.xcodeproj/project.pbxproj; then
+              echo "::error file=$file::not referenced in the Sources build phase"
+              MISSING=1
+            fi
+          done < <(find Luna -name '*.swift' | sort)
+          if [ "$MISSING" -ne 0 ]; then exit 1; fi
+          echo "all Swift files are wired into the target"
+
+      - name: Lint for accidentally committed secrets
+        run: |
+          set -euo pipefail
+          # Luna's entitlements use $(TeamIdentifierPrefix) precisely so that no
+          # real team ID ever lands in the repository. Enforce that.
+          if grep -rnE 'DEVELOPMENT_TEAM *= *[A-Z0-9]{10}' . \
+               --include='*.pbxproj' --include='*.xcconfig' --include='*.yml' 2>/dev/null; then
+            echo "::error::a concrete DEVELOPMENT_TEAM is committed; it must stay empty"
+            exit 1
+          fi
+          if grep -rn 'BEGIN PRIVATE KEY\|BEGIN RSA PRIVATE KEY' . 2>/dev/null; then
+            echo "::error::a private key appears to be committed"
+            exit 1
+          fi
+          echo "no secrets found"
+
+      # ── Build ─────────────────────────────────────────────────────────────
+
+      - name: Build and archive
+        run: |
+          set -euo pipefail
+
+          CONFIGURATION="${{ github.event.inputs.configuration || 'Release' }}"
+          echo "Configuration: $CONFIGURATION"
+
+          # Every signing-related setting is explicitly neutralised. Passing
+          # them on the command line (rather than relying on the project file)
+          # means the build cannot silently start requiring a certificate if
+          # someone flips a setting in Xcode later.
+          xcodebuild archive \
+            -project Luna.xcodeproj \
+            -scheme Luna \
+            -configuration "$CONFIGURATION" \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/Luna.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            DEVELOPMENT_TEAM="" \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
+            -quiet
+
+          echo "── Archive contents ──"
+          find build/Luna.xcarchive/Products -maxdepth 3 -type d | head -20
+
+      - name: Verify the built binary
+        run: |
+          set -euo pipefail
+          APP=$(find build/Luna.xcarchive/Products/Applications -maxdepth 1 -name '*.app' | head -1)
+          test -n "$APP" || { echo "::error::no .app produced"; exit 1; }
+          echo "App bundle: $APP"
+
+          BINARY="$APP/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
+          test -f "$BINARY" || { echo "::error::main executable missing"; exit 1; }
+
+          echo "── Architecture ──"
+          lipo -info "$BINARY"
+
+          # A device build must be arm64. If this ever reports something else,
+          # the deployment target or destination drifted.
+          lipo -info "$BINARY" | grep -q 'arm64' \
+            || { echo "::error::binary is not arm64"; exit 1; }
+
+          echo "── Mach-O header ──"
+          otool -hv "$BINARY" | head -5
+
+          echo "── Entitlements requested ──"
+          sed -n 's/.*<string>\(.*luna\.guest.*\)<\/string>.*/\1/p' \
+            Luna/Luna.entitlements | head -3
+          echo "(128 groups total)"
+
+          echo "── Bundle id ──"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+
+          APP=$(find build/Luna.xcarchive/Products/Applications -maxdepth 1 -name '*.app' | head -1)
+          CONFIGURATION="${{ github.event.inputs.configuration || 'Release' }}"
+
+          # An .ipa is just a zip with a Payload/ directory at its root.
+          rm -rf build/ipa
+          mkdir -p build/ipa/Payload
+          cp -R "$APP" build/ipa/Payload/
+
+          # Strip any signature Xcode may have emitted. A partially-signed
+          # bundle confuses sideloading tools more than a clean unsigned one.
+          rm -rf build/ipa/Payload/*.app/_CodeSignature
+          rm -f  build/ipa/Payload/*.app/embedded.mobileprovision
+
+          cd build/ipa
+          zip -qry "../Luna-unsigned.ipa" Payload
+          cd ../../
+
+          ls -lh build/Luna-unsigned.ipa
+          echo "ipa_size=$(du -h build/Luna-unsigned.ipa | cut -f1)" >> "$GITHUB_ENV"
+
+      - name: Write install instructions
+        run: |
+          cat > build/INSTALL.md <<'EOF'
+          # Installing Luna
+
+          `Luna-unsigned.ipa` has **no signature**. Your device will refuse it
+          until you sign it with an identity it trusts. Pick one:
+
+          | Method | Requires | Notes |
+          |---|---|---|
+          | **SideStore** | a computer once, to install SideStore | Re-signs on-device. 7-day expiry on a free Apple ID. |
+          | **AltStore** | a computer running AltServer | Same 7-day expiry, simpler setup. |
+          | **TrollStore** | a device vulnerable to a CoreTrust bypass (roughly iOS 14–17.0) | Permanent signature, no expiry. Also the only path that unlocks JIT for the runtime loader. |
+          | **Sideloadly / iLoader** | a computer | Fastest one-off install. |
+          | **Paid developer certificate** | $99/yr Apple Developer Program | 1-year signature. Sign with your own .p12. |
+
+          ## Signing notes
+
+          * Free Apple IDs allow **3 apps and 10 App IDs per week**. Luna uses 1
+            App ID. Guests do not consume App IDs — they are never registered
+            with the system.
+          * To make the **runtime loader** work you need JIT, which requires the
+            signature to carry `get-task-allow`. Free/paid *distribution*
+            certificates cannot have it. Practical options: TrollStore, or a
+            debug-signed development build.
+          * Without JIT, Luna still imports, unpacks, inspects, patches and
+            manages guests. Only the final code-mapping step is unavailable, and
+            the app says so explicitly on the Diagnostics tab.
+
+          ## First run
+
+          1. Launch Luna.
+          2. Tap **+** and pick an `.ipa`.
+          3. If the app warns about encryption, the IPA was dumped from the App
+             Store and its `__TEXT` is still encrypted — use a decrypted build.
+          4. Open the guest, confirm the trust notice, and launch.
+          EOF
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Luna-unsigned-ipa
+          path: |
+            build/Luna-unsigned.ipa
+            build/INSTALL.md
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload archive for debugging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Luna-xcarchive
+          path: build/Luna.xcarchive
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # A rolling release means the newest build is always at a stable URL,
+      # which is what an AltStore/SideStore source needs.
+      - name: Publish rolling release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TAG="nightly"
+          TITLE="Luna nightly"
+          NOTES="Automated build of \`${{ github.sha }}\`.
+
+          This IPA is **unsigned**. See INSTALL.md for how to sign and install it.
+
+          Built with \`${{ github.event.inputs.configuration || 'Release' }}\` configuration."
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" build/Luna-unsigned.ipa build/INSTALL.md --clobber
+          else
+            gh release create "$TAG" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              --prerelease \
+              build/Luna-unsigned.ipa build/INSTALL.md
+          fi
+
+          echo "### Luna built successfully" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Unsigned IPA: **${{ env.ipa_size }}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Download from the **Artifacts** section, or from the [nightly release](https://github.com/${{ github.repository }}/releases/tag/nightly)." >> "$GITHUB_STEP_SUMMARY"
