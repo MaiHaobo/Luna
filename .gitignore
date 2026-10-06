@@ -36,3 +36,9 @@ Package.resolved
 # Local overrides
 Local.xcconfig
 xcconfigs/Local.xcconfig
+
+# Python (tools/ holds the build-time checkers)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
