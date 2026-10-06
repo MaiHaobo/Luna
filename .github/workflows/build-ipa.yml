@@ -78,6 +78,14 @@ jobs:
           # runs in a second and catches the mistakes that cost a full build.
           python3 tools/swift_sanity.py Luna
 
+      - name: Validate the Xcode project file
+        run: |
+          set -euo pipefail
+          # Xcode reports a pbxproj parse error as "the project is damaged"
+          # with no line number. This tokenizer names the exact line, and also
+          # checks that every fileRef / buildPhase reference resolves.
+          python3 tools/pbxproj_check.py
+
       - name: Mach-O algorithm tests
         run: |
           set -euo pipefail

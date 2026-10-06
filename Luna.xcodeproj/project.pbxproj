@@ -304,10 +304,10 @@
 				1AB6B198A0720F92C288BEC3 /* LoaderDiagnosticsView.swift in Sources */,
 				EBC83EABE940492325F106D7 /* SessionCoordinator.swift in Sources */,
 				4597C88F4732529F3F099D88 /* SettingsView.swift in Sources */,
+				C587DB02581E00D68B17EDA1 /* LoaderRegistry.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-				C587DB02581E00D68B17EDA1 /* LoaderRegistry.swift in Sources */,
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
@@ -372,7 +372,7 @@
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGNING_REQUIRED = NO;
-				DEVELOPMENT_TEAM = ;
+				DEVELOPMENT_TEAM = "";
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -404,7 +404,7 @@
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGNING_REQUIRED = NO;
-				DEVELOPMENT_TEAM = ;
+				DEVELOPMENT_TEAM = "";
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
