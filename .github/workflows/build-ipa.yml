@@ -340,6 +340,10 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
               "build/${ipa_name}" build/Luna-unsigned.ipa build/INSTALL.md --clobber
+            # `gh release upload` replaces assets but leaves the notes from
+            # whichever build created the release. Without this the page
+            # keeps advertising the version that happened to be first.
+            gh release edit "$TAG" --notes "$NOTES"
           else
             gh release create "$TAG" \
               --title "$TITLE" \

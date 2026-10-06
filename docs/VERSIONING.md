@@ -78,3 +78,41 @@ https://github.com/MaiHaobo/Luna/releases/tag/nightly
 | `INSTALL.md` | 安装说明，标题里带版本号 |
 
 其他分支的构建（`workflow_dispatch`）只上传 Artifact，不发布 Release。
+
+## 改工作流时的两个坑
+
+### `GITHUB_ENV` 的名称大小写敏感
+
+写入时用什么名字，读取时就得用什么名字：
+
+```bash
+# Package IPA 步骤
+echo "ipa_name=${IPA}" >> "$GITHUB_ENV"     # 写 ipa_name
+
+# 后续步骤
+"build/${ipa_name}"                         # 必须也是小写
+```
+
+写成 `${IPA}` 不会得到空字符串，而是 **`unbound variable` 直接失败**
+（因为那些步骤开了 `set -u`）。这个坑真实发生过一次：打包成功了，
+发布步骤挂掉，因为包装步骤写的是小写、发布步骤读的是大写。
+
+**约定：所有跨步骤变量一律小写**，大写只用于步骤内部的临时 shell 变量。
+
+### 没开 `set -u` 的步骤会静默出错
+
+更要命的是同一类错误的另一种表现。`Write install instructions`
+原本没声明 `set -euo pipefail`，于是 `${VERSION}` 这类未绑定变量
+**悄悄展开成空字符串**，步骤显示成功，但生成的文件是：
+
+```markdown
+# Installing Luna              ← 版本号是空的
+
+`-unsigned.ipa` has **no signature**.   ← 文件名也是空的
+```
+
+比崩溃更糟，因为不会有人注意到。
+
+**约定：每个 `run:` 步骤开头都写 `set -euo pipefail`**，让这类笔误
+立刻失败。唯一的例外是你确实需要容忍某个命令失败（用 `|| true` 显式标注）。
+
