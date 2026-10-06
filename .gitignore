@@ -1,0 +1,44 @@
+# Xcode
+build/
+DerivedData/
+*.xcarchive
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.moved-aside
+*.hmap
+*.ipa
+*.xcuserstate
+project.xcworkspace/
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+
+# Swift Package Manager
+.swiftpm/
+.build/
+Packages/
+Package.resolved
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Signing material — never commit these
+*.p12
+*.mobileprovision
+*.cer
+*.pem
+*.key
+
+# Local overrides
+Local.xcconfig
+xcconfigs/Local.xcconfig
+
+# Python (tools/ holds the build-time checkers)
+__pycache__/
+*.py[cod]
+.venv/
+venv/

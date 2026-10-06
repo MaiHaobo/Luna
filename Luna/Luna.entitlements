@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Luna reserves 128 Keychain access groups so each guest can be pinned to
+	  its own compartment. KeychainGroupAllocator assigns the index
+	  deterministically from the guest's bundle identifier; the two must stay
+	  in sync, so change one and you must change the other.
+	-->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(TeamIdentifierPrefix)luna.guest.0</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.1</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.2</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.3</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.4</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.5</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.6</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.7</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.8</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.9</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.10</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.11</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.12</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.13</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.14</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.15</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.16</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.17</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.18</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.19</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.20</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.21</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.22</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.23</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.24</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.25</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.26</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.27</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.28</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.29</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.30</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.31</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.32</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.33</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.34</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.35</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.36</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.37</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.38</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.39</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.40</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.41</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.42</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.43</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.44</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.45</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.46</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.47</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.48</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.49</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.50</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.51</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.52</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.53</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.54</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.55</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.56</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.57</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.58</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.59</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.60</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.61</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.62</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.63</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.64</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.65</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.66</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.67</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.68</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.69</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.70</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.71</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.72</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.73</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.74</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.75</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.76</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.77</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.78</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.79</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.80</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.81</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.82</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.83</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.84</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.85</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.86</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.87</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.88</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.89</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.90</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.91</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.92</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.93</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.94</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.95</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.96</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.97</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.98</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.99</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.100</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.101</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.102</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.103</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.104</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.105</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.106</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.107</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.108</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.109</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.110</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.111</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.112</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.113</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.114</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.115</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.116</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.117</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.118</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.119</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.120</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.121</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.122</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.123</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.124</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.125</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.126</string>
+		<string>$(TeamIdentifierPrefix)luna.guest.127</string>
+	</array>
+
+	<!--
+	  Deliberately NOT requested:
+	    get-task-allow                 -> would enable JIT, and requires a
+	                                      development-signed build. Adding it
+	                                      here would break ad-hoc signing and
+	                                      is meaningless on a store build.
+	    com.apple.developer.* (most)   -> Luna has no need for them.
+	-->
+</dict>
+</plist>
