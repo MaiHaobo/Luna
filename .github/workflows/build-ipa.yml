@@ -209,6 +209,15 @@ jobs:
           APP=$(find build/Luna.xcarchive/Products/Applications -maxdepth 1 -name '*.app' | head -1)
           CONFIGURATION="${{ github.event.inputs.configuration || 'Release' }}"
 
+          # Read the version straight out of the built bundle rather than
+          # from a number repeated here. MARKETING_VERSION in project.pbxproj
+          # is the single source of truth; duplicating it in this file would
+          # let the two drift, and a mislabelled artifact is worse than an
+          # unlabelled one.
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")
+          IPA="Luna-${VERSION}-unsigned.ipa"
+          echo "ipa_name=${IPA}" >> "$GITHUB_ENV"
+
           # An .ipa is just a zip with a Payload/ directory at its root.
           rm -rf build/ipa
           mkdir -p build/ipa/Payload
@@ -220,18 +229,26 @@ jobs:
           rm -f  build/ipa/Payload/*.app/embedded.mobileprovision
 
           cd build/ipa
-          zip -qry "../Luna-unsigned.ipa" Payload
+          zip -qry "../${IPA}" Payload
           cd ../../
 
-          ls -lh build/Luna-unsigned.ipa
-          echo "ipa_size=$(du -h build/Luna-unsigned.ipa | cut -f1)" >> "$GITHUB_ENV"
+          # Keep an unversioned copy alongside it. The release step and any
+          # tooling that watched this path before it learned about versions
+          # can keep pointing at the stable name.
+          cp "build/${IPA}" build/Luna-unsigned.ipa
+
+          echo "version=${VERSION}" >> "$GITHUB_ENV"
+          ls -lh "build/${IPA}" build/Luna-unsigned.ipa
+          echo "ipa_size=$(du -h "build/${IPA}" | cut -f1)" >> "$GITHUB_ENV"
 
       - name: Write install instructions
         run: |
-          cat > build/INSTALL.md <<'EOF'
-          # Installing Luna
+          # Unquoted heredoc so ${IPA} and ${VERSION} expand. Backticks and
+          # `$` in the body therefore need escaping — see \$99 below.
+          cat > build/INSTALL.md <<EOF
+          # Installing Luna ${VERSION}
 
-          `Luna-unsigned.ipa` has **no signature**. Your device will refuse it
+          \`${IPA}\` has **no signature**. Your device will refuse it
           until you sign it with an identity it trusts. Pick one:
 
           | Method | Requires | Notes |
@@ -240,7 +257,7 @@ jobs:
           | **AltStore** | a computer running AltServer | Same 7-day expiry, simpler setup. |
           | **TrollStore** | a device vulnerable to a CoreTrust bypass (roughly iOS 14–17.0) | Permanent signature, no expiry. Not required to use Luna — see below. |
           | **Sideloadly / iLoader** | a computer | Fastest one-off install. |
-          | **Paid developer certificate** | $99/yr Apple Developer Program | 1-year signature. Sign with your own .p12. |
+          | **Paid developer certificate** | \$99/yr Apple Developer Program | 1-year signature. Sign with your own .p12. |
 
           ## Signing notes
 
@@ -248,23 +265,23 @@ jobs:
             App ID. Guests do not consume App IDs — they are never registered
             with the system.
           * **Luna does not need JIT to work.** Importing, unpacking, parsing the
-            Mach-O, rewriting `MH_EXECUTE` into `MH_DYLIB`, managing the session
+            Mach-O, rewriting \`MH_EXECUTE\` into \`MH_DYLIB\`, managing the session
             container and the per-guest Keychain compartments all run without
             it. Any of the methods above is enough.
           * JIT is only relevant to the optional runtime loader, which maps the
-            patched binary into the process with `dlopen`. That path needs
-            `get-task-allow` in the signature, which distribution certificates
+            patched binary into the process with \`dlopen\`. That path needs
+            \`get-task-allow\` in the signature, which distribution certificates
             cannot carry. It is a separate, experimental feature — not a
             prerequisite for the app.
-          * `Luna.entitlements` deliberately omits `get-task-allow`, so ad-hoc
+          * \`Luna.entitlements\` deliberately omits \`get-task-allow\`, so ad-hoc
             and free-account signing both work.
 
           ## First run
 
           1. Launch Luna.
-          2. Tap **+** and pick an `.ipa`.
+          2. Tap **+** and pick an \`.ipa\`.
           3. If the app warns about encryption, the IPA was dumped from the App
-             Store and its `__TEXT` is still encrypted — use a decrypted build.
+             Store and its \`__TEXT\` is still encrypted — use a decrypted build.
           4. Open the guest, confirm the trust notice, and launch.
           EOF
 
@@ -273,6 +290,7 @@ jobs:
         with:
           name: Luna-unsigned-ipa
           path: |
+            build/${{ env.ipa_name }}
             build/Luna-unsigned.ipa
             build/INSTALL.md
           retention-days: 90
@@ -298,23 +316,30 @@ jobs:
 
           TAG="nightly"
           TITLE="Luna nightly"
-          NOTES="Automated build of \`${{ github.sha }}\`.
+          NOTES="Version \`${VERSION}\` — automated build of \`${{ github.sha }}\`.
 
           This IPA is **unsigned**. See INSTALL.md for how to sign and install it.
 
           Built with \`${{ github.event.inputs.configuration || 'Release' }}\` configuration."
 
+          # Both names go up. The versioned one is what a human wants to
+          # download; the stable one keeps the URL that AltStore/SideStore
+          # sources and older scripts already point at. --clobber replaces
+          # the stable copy from the previous build instead of leaving a
+          # stale one behind.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" build/Luna-unsigned.ipa build/INSTALL.md --clobber
+            gh release upload "$TAG" \
+              "build/${IPA}" build/Luna-unsigned.ipa build/INSTALL.md --clobber
           else
             gh release create "$TAG" \
               --title "$TITLE" \
               --notes "$NOTES" \
               --prerelease \
-              build/Luna-unsigned.ipa build/INSTALL.md
+              "build/${IPA}" build/Luna-unsigned.ipa build/INSTALL.md
           fi
 
           echo "### Luna built successfully" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Unsigned IPA: **${{ env.ipa_size }}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: **${VERSION}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Unsigned IPA: **${IPA}** (${ipa_size:-unknown})" >> "$GITHUB_STEP_SUMMARY"
           echo "- Download from the **Artifacts** section, or from the [nightly release](https://github.com/${{ github.repository }}/releases/tag/nightly)." >> "$GITHUB_STEP_SUMMARY"
