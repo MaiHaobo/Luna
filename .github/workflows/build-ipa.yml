@@ -32,14 +32,17 @@ concurrency:
 jobs:
   build:
     name: Build Luna (unsigned)
-    runs-on: macos-15
+    # macOS 26 ships Xcode 26, which is the first SDK exposing the Liquid
+    # Glass APIs (glassEffect, GlassEffectContainer) that Luna's UI needs.
+    # The deployment target is iOS 26.0 for the same reason.
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # Xcode 16.x on macOS 15 is the combination we target. Pinning the major
+      # Xcode 26.x on macOS 26 is the combination we target. Pinning the major
       # version keeps the Swift compiler from drifting under us; a floating
       # "latest" would silently change codegen between runs.
       - name: Select Xcode
@@ -47,7 +50,7 @@ jobs:
           set -euo pipefail
           echo "Installed Xcode versions:"
           ls -1 /Applications | grep -i '^Xcode' || true
-          LATEST=$(ls -1d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1 || true)
+          LATEST=$(ls -1d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)
           if [ -z "$LATEST" ]; then
             LATEST=$(ls -1d /Applications/Xcode*.app | sort -V | tail -1)
           fi
