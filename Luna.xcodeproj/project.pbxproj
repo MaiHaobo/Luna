@@ -27,6 +27,7 @@
 		4597C88F4732529F3F099D88 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 296F4F7DE124594414E521FB; };
 		8090CEE59A6B84CBCDB0CD11 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 51B429931139E1B6EA6463A8; };
 		C587DB02581E00D68B17EDA1 /* LoaderRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C232585D56B03791407449DA; };
+		EF5292DE124241BD880915DC /* LunaGlass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 201E4A491A164C0FBF8879E3; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -53,6 +54,7 @@
 		51B429931139E1B6EA6463A8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		37C716D70B6D7AC589C853D3 /* Luna.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Luna.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C232585D56B03791407449DA /* LoaderRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoaderRegistry.swift; sourceTree = "<group>"; };
+		201E4A491A164C0FBF8879E3 /* LunaGlass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunaGlass.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -81,6 +83,7 @@
 				410188F9DC6E499FEC68BCF6 /* Core */,
 				1F26A8704D8CDB03D5D3D4BB /* Features */,
 				A024F06580C79B7582C3806A /* Resources */,
+				434A0280EB28437DB2DA3ADF /* Support */,
 				69EE4EE0AE1123C239A73763 /* Info.plist */,
 				DF6DE751E09ED4D073E3CA49 /* Luna.entitlements */,
 			);
@@ -207,6 +210,14 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		434A0280EB28437DB2DA3ADF /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				201E4A491A164C0FBF8879E3 /* LunaGlass.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
 		5151B46607EBC8890D8DFCC2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -304,6 +315,7 @@
 				1AB6B198A0720F92C288BEC3 /* LoaderDiagnosticsView.swift in Sources */,
 				EBC83EABE940492325F106D7 /* SessionCoordinator.swift in Sources */,
 				4597C88F4732529F3F099D88 /* SettingsView.swift in Sources */,
+				EF5292DE124241BD880915DC /* LunaGlass.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
