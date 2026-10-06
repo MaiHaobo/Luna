@@ -265,8 +265,8 @@ private struct GuestCanvas: View {
                 section("容器说明") {
                     Text("""
                     Luna 已解压该 bundle、解析其 Mach-O、完成加载前所需的二进制改写，并准备好会话容器。
-                    最终的代码映射（dlopen + entry point 跳转）需要 JIT 权限，当前构建在未满足该前置条件时
-                    会停在此处，而不是以崩溃告终。
+                    这些步骤都不依赖 JIT。可选的运行时加载器会把改写后的二进制映射进进程，
+                    那一步需要 JIT 权限；未满足时停在此处，而不是以崩溃告终。
                     """)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)

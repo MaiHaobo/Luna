@@ -238,7 +238,7 @@ jobs:
           |---|---|---|
           | **SideStore** | a computer once, to install SideStore | Re-signs on-device. 7-day expiry on a free Apple ID. |
           | **AltStore** | a computer running AltServer | Same 7-day expiry, simpler setup. |
-          | **TrollStore** | a device vulnerable to a CoreTrust bypass (roughly iOS 14–17.0) | Permanent signature, no expiry. Also the only path that unlocks JIT for the runtime loader. |
+          | **TrollStore** | a device vulnerable to a CoreTrust bypass (roughly iOS 14–17.0) | Permanent signature, no expiry. Not required to use Luna — see below. |
           | **Sideloadly / iLoader** | a computer | Fastest one-off install. |
           | **Paid developer certificate** | $99/yr Apple Developer Program | 1-year signature. Sign with your own .p12. |
 
@@ -247,13 +247,17 @@ jobs:
           * Free Apple IDs allow **3 apps and 10 App IDs per week**. Luna uses 1
             App ID. Guests do not consume App IDs — they are never registered
             with the system.
-          * To make the **runtime loader** work you need JIT, which requires the
-            signature to carry `get-task-allow`. Free/paid *distribution*
-            certificates cannot have it. Practical options: TrollStore, or a
-            debug-signed development build.
-          * Without JIT, Luna still imports, unpacks, inspects, patches and
-            manages guests. Only the final code-mapping step is unavailable, and
-            the app says so explicitly on the Diagnostics tab.
+          * **Luna does not need JIT to work.** Importing, unpacking, parsing the
+            Mach-O, rewriting `MH_EXECUTE` into `MH_DYLIB`, managing the session
+            container and the per-guest Keychain compartments all run without
+            it. Any of the methods above is enough.
+          * JIT is only relevant to the optional runtime loader, which maps the
+            patched binary into the process with `dlopen`. That path needs
+            `get-task-allow` in the signature, which distribution certificates
+            cannot carry. It is a separate, experimental feature — not a
+            prerequisite for the app.
+          * `Luna.entitlements` deliberately omits `get-task-allow`, so ad-hoc
+            and free-account signing both work.
 
           ## First run
 
