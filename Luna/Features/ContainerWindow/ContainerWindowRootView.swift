@@ -18,22 +18,31 @@ struct ContainerWindowRootView: View {
     var body: some View {
         VStack(spacing: 0) {
             titleBar
-            Divider().overlay(Color.white.opacity(0.08))
+            Divider().overlay(Color.white.opacity(0.12))
             content
             if isLogExpanded {
-                Divider().overlay(Color.white.opacity(0.08))
+                Divider().overlay(Color.white.opacity(0.12))
                 logPane
             }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        // Liquid Glass, tinted dark. The overlay hosts a pure-black guest
+        // canvas and draws white chrome over it, so plain glass would sample
+        // the app behind the window and turn this into a light surface that
+        // the white labels cannot sit on.
+        //
+        // Two things this deliberately no longer does. It does not paint an
+        // opaque `secondarySystemBackground` fill: an opaque backing covers
+        // the backdrop, leaving the material nothing to sample, which renders
+        // glass as a flat grey rectangle. And it does not `.clipShape` the
+        // card: the glass effect draws its own rounded bounds and clips to
+        // them, so clipping again would cut off the highlight that makes the
+        // material read as glass.
+        //
+        // Order matters. `glassEffect` must come after the layout-affecting
+        // modifiers, and the outer `.padding` must stay outside it, or the
+        // twelve-point inset gets swallowed into the material and the shadow
+        // lands on the wrong bounds.
+        .lunaGlassDarkScrim(cornerRadius: 18)
         .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
         .padding(12)
     }
@@ -47,12 +56,18 @@ struct ContainerWindowRootView: View {
                 .frame(width: 9, height: 9)
 
             VStack(alignment: .leading, spacing: 1) {
+                // Both lines are explicit whites. The title bar previously sat
+                // on an opaque `tertiarySystemBackground`, where `.primary` and
+                // `.secondary` resolved correctly per appearance. It now sits
+                // on dark glass, so the dynamic styles would render near-black
+                // text in light mode against a dark surface.
                 Text(session.guest.displayName)
                     .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
                     .lineLimit(1)
                 Text("\(session.phase.label) · \(session.loaderName)")
                     .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.6))
                     .lineLimit(1)
             }
 
@@ -63,6 +78,7 @@ struct ContainerWindowRootView: View {
             } label: {
                 Image(systemName: isLogExpanded ? "text.alignleft" : "text.alignleft")
                     .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white)
                     .opacity(isLogExpanded ? 1 : 0.5)
             }
             .buttonStyle(.plain)
@@ -80,7 +96,6 @@ struct ContainerWindowRootView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(Color(uiColor: .tertiarySystemBackground))
     }
 
     private var statusColor: Color {
@@ -136,16 +151,16 @@ struct ContainerWindowRootView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
-        .background(Color(uiColor: .quaternarySystemFill).opacity(0.35))
     }
 
     private func metric(_ title: String, _ value: String, truncate: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title)
                 .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.5))
             Text(value)
                 .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.85))
                 .lineLimit(1)
                 .truncationMode(truncate ? .middle : .tail)
         }
@@ -160,9 +175,10 @@ struct ContainerWindowRootView: View {
                 .foregroundStyle(.orange)
             Text("无法启动")
                 .font(.headline)
+                .foregroundStyle(.white)
             Text(message)
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 28)
             Button("关闭窗口", action: onClose)
@@ -180,7 +196,14 @@ struct ContainerWindowRootView: View {
                     ForEach(Array(session.logLines.enumerated()), id: \.offset) { pair in
                         Text(pair.element)
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                            // An explicit white rather than `.secondary`. The
+                            // pane used to be opaque black, where the dynamic
+                            // secondary style resolved to a legible grey. It
+                            // is now a translucent pane over dark glass, so
+                            // the resolved colour follows the system
+                            // appearance and drifts toward unreadable in
+                            // light mode.
+                            .foregroundStyle(.white.opacity(0.72))
                             .textSelection(.enabled)
                             .id(pair.offset)
                     }
@@ -189,7 +212,7 @@ struct ContainerWindowRootView: View {
                 .padding(10)
             }
             .frame(height: 150)
-            .background(Color.black.opacity(0.85))
+            .background(LunaGlassPalette.codePane)
             .onChange(of: session.logLines.count) { _, count in
                 withAnimation { proxy.scrollTo(count - 1, anchor: .bottom) }
             }
