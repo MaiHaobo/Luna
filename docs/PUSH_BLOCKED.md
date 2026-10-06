@@ -2,7 +2,7 @@
 
 > **状态：✅ 已解决（2026-10-06）**
 > 仓库：https://github.com/MaiHaobo/Luna
-> 分支：`main` @ `0d057da`
+> 分支：`main`、`liquid-glass`
 
 这份文档原本用于记录「推不上去」的阻塞。阻塞已解除，保留下来是因为排查过程本身有价值——
 如果你以后遇到类似的「API 能读不能写」，这里的诊断路径可以直接复用。
@@ -64,13 +64,43 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 
 ## 推送方式
 
-标准 `git push`，一条命令：
+优先用标准 `git push`：
 
 ```bash
 git remote add origin "https://oauth2:${GITHUB_TOKEN}@github.com/MaiHaobo/Luna.git"
 git push -u origin main
 ```
 
-`tools/api_push.py` 作为备用通道保留。它走 `api.github.com` 的 Git Data API
-（blob → tree → commit → ref）重建一次推送，适用于 git 协议被阻断的环境。
-本次没用上，但留着以防网络再次波动。
+### 备用通道：`tools/api_push.py`
+
+当 `github.com:443` 被阻断时（症状见上节），改用这个脚本。它走
+`api.github.com` 的 Git Data API（blob → tree → commit → ref）重建一次推送。
+已实际投产三次。
+
+```bash
+LUNA_BRANCH=liquid-glass GITHUB_TOKEN=... python3 tools/api_push.py
+```
+
+**两个必须知道的坑：**
+
+1. **变量名是 `LUNA_BRANCH`，不是 `GITHUB_BRANCH`。**
+   传错名字不会报错——脚本会静默回落到默认值 `main`，
+   把分支上的改动推到 `main` 去。第一次就踩了这个。
+
+2. **它会产生一个内容相同、SHA 不同的提交。**
+   因为 tree 是从工作目录重建的，不是从 git 对象库导出的，
+   所以远端提交与本地提交没有共同的父提交。表现是下一次
+   `git push` 被拒（non-fast-forward），且
+   `git merge` 报 `refusing to merge unrelated histories`。
+   处理办法：
+
+   ```bash
+   git fetch origin <branch>:refs/remotes/tmp/x
+   git diff --stat refs/remotes/tmp/x HEAD   # 确认为空，即内容一致
+   git merge --no-ff --allow-unrelated-histories -X ours <sha>
+   ```
+
+   `-X ours` 保留本地这条有真实提交信息的历史链。
+
+   规范做法是网络恢复后**优先 `git push`**，
+   让 API 通道只作为应急手段，避免历史反复分叉。

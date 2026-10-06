@@ -198,9 +198,17 @@ struct AppLibraryView: View {
                     .font(.system(size: 13, weight: .medium))
             }
         }
+        // The import banner floats above the library list, which is exactly
+        // the navigation layer the material is meant for. `.bar` was a
+        // pre-iOS-26 approximation of the same idea; glassEffect is the
+        // system's own treatment and picks up the list scrolling underneath.
+        //
+        // The padding moves after the material on purpose: applied before, it
+        // would be measured into the glass's own bounds and the rounded edge
+        // would land inside the banner rather than around it.
+        .lunaGlassCard(cornerRadius: 16)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(.bar)
         .transition(.move(edge: .bottom).combined(with: .opacity))
         .animation(.easeInOut, value: stage)
     }
