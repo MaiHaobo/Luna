@@ -243,12 +243,18 @@ jobs:
 
       - name: Write install instructions
         run: |
-          # Unquoted heredoc so ${IPA} and ${VERSION} expand. Backticks and
-          # `$` in the body therefore need escaping — see \$99 below.
-          cat > build/INSTALL.md <<EOF
-          # Installing Luna ${VERSION}
+          # `set -u` is the point of this line, not boilerplate: the names
+          # below come from GITHUB_ENV, and a case mismatch against them
+          # would otherwise expand to an empty string and quietly produce a
+          # title reading "# Installing Luna " with no version in it.
+          set -euo pipefail
 
-          \`${IPA}\` has **no signature**. Your device will refuse it
+          # Unquoted heredoc so ${ipa_name} and ${version} expand. Backticks
+          # and `$` in the body therefore need escaping — see \$99 below.
+          cat > build/INSTALL.md <<EOF
+          # Installing Luna ${version}
+
+          \`${ipa_name}\` has **no signature**. Your device will refuse it
           until you sign it with an identity it trusts. Pick one:
 
           | Method | Requires | Notes |
@@ -316,7 +322,11 @@ jobs:
 
           TAG="nightly"
           TITLE="Luna nightly"
-          NOTES="Version \`${VERSION}\` — automated build of \`${{ github.sha }}\`.
+          # GITHUB_ENV names are injected verbatim, so this must match the
+          # lower-case name written by the packaging step. Under `set -u`
+          # a case mismatch is not a silent empty string — it aborts the
+          # step with "unbound variable".
+          NOTES="Version \`${version}\` — automated build of \`${{ github.sha }}\`.
 
           This IPA is **unsigned**. See INSTALL.md for how to sign and install it.
 
@@ -329,17 +339,17 @@ jobs:
           # stale one behind.
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
-              "build/${IPA}" build/Luna-unsigned.ipa build/INSTALL.md --clobber
+              "build/${ipa_name}" build/Luna-unsigned.ipa build/INSTALL.md --clobber
           else
             gh release create "$TAG" \
               --title "$TITLE" \
               --notes "$NOTES" \
               --prerelease \
-              "build/${IPA}" build/Luna-unsigned.ipa build/INSTALL.md
+              "build/${ipa_name}" build/Luna-unsigned.ipa build/INSTALL.md
           fi
 
           echo "### Luna built successfully" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Version: **${VERSION}**" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Unsigned IPA: **${IPA}** (${ipa_size:-unknown})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: **${version}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Unsigned IPA: **${ipa_name}** (${ipa_size:-unknown})" >> "$GITHUB_STEP_SUMMARY"
           echo "- Download from the **Artifacts** section, or from the [nightly release](https://github.com/${{ github.repository }}/releases/tag/nightly)." >> "$GITHUB_STEP_SUMMARY"
