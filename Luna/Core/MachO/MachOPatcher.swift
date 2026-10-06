@@ -254,6 +254,10 @@ enum MachOPatcher {
 private extension Data {
     mutating func appendLE(_ value: UInt32) {
         var le = value.littleEndian
-        withUnsafeBytes(of: &le) { append(contentsOf: $0) }
+        // `Swift.` is required: inside a Data extension, the bare name
+        // resolves to Data.withUnsafeBytes(_:) (an instance method) rather
+        // than the global withUnsafeBytes(of:_:), and the instance method
+        // does not accept an `of:` label.
+        Swift.withUnsafeBytes(of: &le) { append(contentsOf: $0) }
     }
 }
