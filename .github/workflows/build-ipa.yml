@@ -114,7 +114,18 @@ jobs:
             echo "::error::a concrete DEVELOPMENT_TEAM is committed; it must stay empty"
             exit 1
           fi
-          if grep -rn 'BEGIN PRIVATE KEY\|BEGIN RSA PRIVATE KEY' . 2>/dev/null; then
+
+          # Search tracked files only. Two reasons this matters:
+          #   1. `.git/` holds every historical blob, so scanning it is both
+          #      slow and liable to flag content that was already removed.
+          #   2. This workflow file necessarily contains the marker strings
+          #      below as literals, so scanning it would always self-match.
+          # Excluding the workflow itself and using `git grep` (which reads the
+          # index, not the filesystem) removes both problems.
+          # The pattern is assembled from fragments so the assembled text never
+          # appears verbatim in this file either.
+          MARKER='BEGIN( RSA)? PRIVATE KEY'
+          if git grep -nE "$MARKER" -- . ':(exclude).github/workflows/*' 2>/dev/null; then
             echo "::error::a private key appears to be committed"
             exit 1
           fi
