@@ -34,6 +34,16 @@ final class SessionCoordinator: ObservableObject {
                 executable: executable
             )
         }
+
+        // The runtime loader reports through the same presentation path, but
+        // carries its own step-by-step log — the five dyld steps are the whole
+        // point of that backend, so the log pane is where they surface.
+        registry.runtime.onLog = { [weak self] line in
+            self?.activeSession?.append(line)
+        }
+        registry.runtime.onLoaded = { [weak self] guest, dyldReport in
+            self?.presentRuntimeSession(for: guest, report: dyldReport)
+        }
     }
 
     var capabilities: LoaderCapabilities { registry.capabilities }
@@ -56,6 +66,9 @@ final class SessionCoordinator: ObservableObject {
             let session = ContainerSession(guest: guest, loaderName: loader.name)
             session.append("选择加载器：\(loader.name)")
             session.append("能力探测通过，开始映射 guest 镜像")
+            // `begin` must run first: the loader's log callback targets
+            // `activeSession`, and the presentation callback needs the window
+            // to already exist.
             begin(session)
             do {
                 try loader.launch(guest)
@@ -107,6 +120,36 @@ final class SessionCoordinator: ObservableObject {
         updated.state = .launched
         updated.lastLaunchedAt = Date()
         updated.patchSummary = report?.humanReadable
+        updated.lastError = nil
+        store.update(updated)
+    }
+
+    /// Called by `RuntimeLoader` once the guest image is mapped and its entry
+    /// point is resolved.
+    ///
+    /// Distinct from `presentSession` because the runtime path produces a
+    /// `DyldLoadReport` rather than a patch report, and because the session
+    /// window was already created in `launch` (the loader's log callback
+    /// needs somewhere to write while the steps run).
+    private func presentRuntimeSession(
+        for guest: GuestApp,
+        report: DyldLoadReport
+    ) {
+        guard let session = activeSession, session.guest.id == guest.id else {
+            // The user closed the window while the load was in flight. The
+            // image is mapped either way; there is simply nothing to update.
+            return
+        }
+
+        for note in report.notes {
+            session.append(note)
+        }
+        session.markLoaded(report: report)
+
+        // Reflect the real artifact the runtime path loaded.
+        var updated = guest
+        updated.state = .launched
+        updated.lastLaunchedAt = Date()
         updated.lastError = nil
         store.update(updated)
     }
