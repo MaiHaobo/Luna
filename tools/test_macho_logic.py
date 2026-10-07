@@ -27,6 +27,8 @@ MH_EXECUTE = 0x2
 MH_DYLIB = 0x6
 LC_SEGMENT_64 = 0x19
 LC_LOAD_DYLIB = 0xC
+LC_ENCRYPTION_INFO = 0x21
+LC_ENCRYPTION_INFO_64 = 0x2C
 
 # Mirrors MachOPatcher.patchedPageZero
 PATCHED_VMADDR = 0xFFFFC000
@@ -103,6 +105,25 @@ class MachO:
                 out.append(bytes(self.data[start:end]).decode())
         return out
 
+    # ── Encryption info, mirroring MachOImage.encryptionInfo() ──────────────
+    def encryption_info(self):
+        """Returns (cryptoff, cryptsize, cryptid) of the first
+        LC_ENCRYPTION_INFO{,_64} command, or None."""
+        for cmd, off, size in self.load_commands():
+            if cmd in (LC_ENCRYPTION_INFO, LC_ENCRYPTION_INFO_64):
+                return struct.unpack_from("<III", self.data, off + 8)
+        return None
+
+    @staticmethod
+    def is_encrypted(info) -> bool:
+        """Mirrors EncryptionInfo.isEncrypted: cryptid != 0 && cryptsize != 0.
+
+        The point this encodes (and the regression it guards against): every
+        Xcode-linked binary carries the command with cryptid == 0, so testing
+        for the command's *presence* misflags every self-built and decrypted
+        IPA as FairPlay-encrypted."""
+        return info is not None and info[1] != 0 and info[2] != 0
+
     # ── The three edits ─────────────────────────────────────────────────────
     def rewrite_filetype(self):
         if self.filetype == MH_DYLIB:
@@ -154,11 +175,14 @@ class MachO:
 
 # ── Test driver ─────────────────────────────────────────────────────────────
 
-def make_test_binary() -> bytes:
+def make_test_binary(encryption_cmd: bytes | None = None) -> bytes:
     """
     Builds a synthetic arm64 Mach-O executable that mirrors what a real linker
     emits: a __PAGEZERO segment, a __TEXT segment, an LC_MAIN, and — crucially —
     zero padding after the last load command.
+
+    `encryption_cmd` optionally appends an LC_ENCRYPTION_INFO{,_64} command,
+    which bumps ncmds accordingly.
     """
     def segment(name, vmaddr, vmsize, fileoff, filesize, maxprot, initprot):
         # segment_command_64 is 72 bytes, not 64: the layout ends with
@@ -186,13 +210,17 @@ def make_test_binary() -> bytes:
     main_cmd = struct.pack("<IIQQ", 0x80000028, 24, 0x3F00, 0)
 
     commands = pagezero + text + main_cmd
+    ncmds = 3
+    if encryption_cmd is not None:
+        commands += encryption_cmd
+        ncmds += 1
     # Real linkers pad the command region; emulate 4 KB of slack.
     padding = b"\x00" * (4096 - len(commands))
 
     header = struct.pack(
         "<IIIIIIII",
         MH_MAGIC_64, CPU_TYPE_ARM64, 0, MH_EXECUTE,
-        3, len(commands), 0, 0,
+        ncmds, len(commands), 0, 0,
     )
     body = header + commands + padding + b"\x00" * (0x4000 - 4096 - len(header) - len(commands))
     return body
@@ -281,6 +309,47 @@ def run_tests():
         check("非 Mach-O 应抛错", False)
     except ValueError:
         check("非 Mach-O 正确抛错", True)
+
+    print("\n── 6. 加密信息解析（cryptid 判定，修复误报） ──")
+    # 用例 A：自编译明文包 — 链接器保留命令但 cryptid=0。真实链接器甚至
+    # 会填一个非零的预留 cryptsize（Luna 自身的构建就是 cryptoff=0x4000、
+    # cryptsize=0x6C000、cryptid=0）。旧逻辑在此误报为加密。
+    plain = MachO(make_test_binary(
+        encryption_cmd=struct.pack(
+            "<IIIIII", LC_ENCRYPTION_INFO_64, 24, 0x4000, 0x6C000, 0, 0)))
+    info_a = plain.encryption_info()
+    check("明文包：加密命令存在", info_a is not None, f"info={info_a}")
+    check("明文包：cryptid=0 判定为未加密", not MachO.is_encrypted(info_a),
+          f"cryptid={info_a[2]} cryptsize={info_a[1]}")
+
+    # 用例 B：App Store 加密包 — cryptid=1 且 cryptsize>0。
+    store_pkg = MachO(make_test_binary(
+        encryption_cmd=struct.pack(
+            "<IIIIII", LC_ENCRYPTION_INFO_64, 24, 0x4000, 0x6C000, 1, 0)))
+    info_b = store_pkg.encryption_info()
+    check("加密包：cryptid=1 判定为加密", MachO.is_encrypted(info_b),
+          f"cryptid={info_b[2]} cryptsize={info_b[1]}")
+
+    # 用例 C：cryptid=1 但 cryptsize=0 — 无加密区，不得判为加密。
+    zero_size = MachO(make_test_binary(
+        encryption_cmd=struct.pack(
+            "<IIIIII", LC_ENCRYPTION_INFO_64, 24, 0x4000, 0, 1, 0)))
+    info_c = zero_size.encryption_info()
+    check("cryptsize=0 不判为加密", not MachO.is_encrypted(info_c),
+          f"cryptsize={info_c[1]} cryptid={info_c[2]}")
+
+    # 用例 D：无加密命令时其余解析不受影响。
+    no_enc = MachO(make_test_binary())
+    check("无加密命令返回 None", no_enc.encryption_info() is None)
+    check("无加密命令时 __PAGEZERO 仍可解析", no_enc.pagezero() is not None)
+
+    # 用例 E：32 位版本 LC_ENCRYPTION_INFO(0x21, cmdsize=20) 同样识别。
+    legacy = MachO(make_test_binary(
+        encryption_cmd=struct.pack(
+            "<IIIII", LC_ENCRYPTION_INFO, 20, 0x4000, 0x6C000, 1)))
+    info_e = legacy.encryption_info()
+    check("32 位版本 0x21 同样解析并判定", MachO.is_encrypted(info_e),
+          f"cryptid={info_e[2]} cryptsize={info_e[1]}")
 
     passed = sum(1 for _, ok, _ in results if ok)
     total = len(results)

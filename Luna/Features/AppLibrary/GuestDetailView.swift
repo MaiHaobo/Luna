@@ -37,6 +37,8 @@ struct GuestDetailView: View {
                     row("包大小", current.formattedSize)
                 }
 
+                binaryStatusSection
+
                 Section("容器") {
                     row("Guest 文件夹", current.storageDescription, monospaced: true)
                     row("数据文件夹", current.dataFolderName, monospaced: true)
@@ -66,6 +68,11 @@ struct GuestDetailView: View {
                 trustSection
 
                 Section {
+                    Button {
+                        store.reinspect(current)
+                    } label: {
+                        Label("重新检测", systemImage: "arrow.clockwise.circle")
+                    }
                     Button {
                         store.repatch(current)
                     } label: {
@@ -109,6 +116,44 @@ struct GuestDetailView: View {
     }
 
     // MARK: - Sections
+
+    /// FairPlay state of the guest's main binary.
+    ///
+    /// Guests imported by older builds have `encryption == nil` (the field
+    /// did not exist), which reads as "not recorded" rather than "plain" —
+    /// re-inspection fills it in.
+    @ViewBuilder
+    private var binaryStatusSection: some View {
+        if let enc = current.encryption {
+            Section("二进制状态") {
+                HStack {
+                    Label(enc.isEncrypted ? "FairPlay 加密" : "未加密",
+                          systemImage: enc.isEncrypted ? "lock.fill" : "checkmark.seal.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(enc.isEncrypted ? Color.red : Color.green)
+                    Spacer()
+                }
+                row("cryptoff", String(format: "0x%X", enc.cryptoff), monospaced: true)
+                row("cryptsize", byteCount(enc.cryptsize), monospaced: true)
+                row("cryptid", "\(enc.cryptid)", monospaced: true)
+            }
+        } else {
+            Section {
+                Label("未检测", systemImage: "questionmark.circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("二进制状态")
+            } footer: {
+                Text("该 guest 导入于旧版本 Luna，没有加密参数记录。"
+                     + "点下方「重新检测」即可补齐，并清除可能过时的警告。")
+            }
+        }
+    }
+
+    private func byteCount(_ bytes: UInt32) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
 
     private var warningsSection: some View {
         Section("导入检查") {

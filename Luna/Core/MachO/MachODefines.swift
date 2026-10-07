@@ -55,6 +55,15 @@ enum MachOFileType {
     static let bundle: UInt32 = 0x8
 }
 
+// MARK: - Encryption info (`LC_ENCRYPTION_INFO*`)
+
+enum MachOEncryption {
+    /// `encryption_info_command` (32-bit slices).
+    static let infoCommand: UInt32 = 0x21
+    /// `encryption_info_command_64` (64-bit slices).
+    static let infoCommand64: UInt32 = 0x2C
+}
+
 // MARK: - Load command types
 
 enum MachOLoadCommand {
@@ -86,7 +95,8 @@ enum MachOLoadCommand {
         case 0x1D: return "LC_CODE_SIGNATURE"
         case 0x20: return "LC_LAZY_LOAD_DYLIB"
         case 0x22: return "LC_DYLD_INFO"
-        case 0x26: return "LC_ENCRYPTION_INFO"
+        case 0x21: return "LC_ENCRYPTION_INFO"
+        case 0x26: return "LC_FUNCTION_STARTS"
         case 0x29: return "LC_VERSION_MIN_MACOSX"
         case 0x24: return "LC_VERSION_MIN_IPHONEOS"
         case 0x2A: return "LC_SOURCE_VERSION"

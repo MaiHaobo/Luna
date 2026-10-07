@@ -77,6 +77,13 @@ struct GuestApp: Identifiable, Codable, Hashable {
     /// Warnings captured at import time (encryption, entitlements, min OS…).
     var warnings: [String]
 
+    /// FairPlay state of the main binary, captured at import time.
+    ///
+    /// `nil` for guests imported before this field existed — Swift's
+    /// synthesized `Codable` treats a missing key as `nil`, so old manifests
+    /// keep decoding. The detail screen's re-inspection fills it in.
+    var encryption: EncryptionSummary?
+
     /// Keychain access group index assigned to this guest for semi-isolation.
     var keychainGroupIndex: Int
 
@@ -133,8 +140,11 @@ struct GuestApp: Identifiable, Codable, Hashable {
         ByteCountFormatter.string(fromByteCount: bundleSize, countStyle: .file)
     }
 
+    /// True only when the binary is *actually* FairPlay-encrypted, based on
+    /// the recorded `cryptid`/`cryptsize` — never on warning strings, which
+    /// change between releases and once misflagged every Xcode-linked binary.
     var hasBlockingWarning: Bool {
-        warnings.contains { $0.contains("加密") }
+        encryption?.isEncrypted == true
     }
 }
 

@@ -14,6 +14,25 @@
 
 import Foundation
 
+/// Compact, UI-facing summary of a binary's FairPlay state.
+///
+/// Mirrors `MachOImage.EncryptionInfo` but keeps only what the guest record
+/// and the detail screen need, so the persistence layer does not depend on
+/// the Mach-O parser's types.
+struct EncryptionSummary: Codable, Hashable {
+    var cryptoff: UInt32
+    var cryptsize: UInt32
+    var cryptid: UInt32
+    var isEncrypted: Bool
+
+    init(_ info: EncryptionInfo) {
+        cryptoff = info.cryptoff
+        cryptsize = info.cryptsize
+        cryptid = info.cryptid
+        isEncrypted = info.isEncrypted
+    }
+}
+
 /// Everything Luna learns about a guest bundle before installing it.
 struct BundleInspection {
     var bundleIdentifier: String
@@ -36,10 +55,19 @@ struct BundleInspection {
     /// Bytes on disk for the whole bundle.
     var bundleSize: Int64
 
-    /// Whether the main binary carries an `LC_ENCRYPTION_INFO` command, which
-    /// means it was FairPlay-encrypted on download and *cannot* be loaded.
-    /// This is the single most common reason a dumped-from-device IPA fails.
+    /// Whether the main binary is FairPlay-encrypted (`cryptid != 0` with a
+    /// non-zero `cryptsize`), which means it *cannot* be loaded.
+    ///
+    /// Careful: every Xcode-linked iOS binary carries an `LC_ENCRYPTION_INFO`
+    /// command — the linker reserves it with `cryptid == 0`, and decrypted
+    /// dumps keep it the same way. Presence of the command proves nothing;
+    /// only the field values do.
     var isEncrypted: Bool
+
+    /// Full FairPlay parameters of the main binary (`cryptoff` / `cryptsize`
+    /// / `cryptid`), or `nil` when the Mach-O could not be parsed at all.
+    /// `nil` is not "unencrypted" — it is "unknown".
+    var encryptionSummary: EncryptionSummary?
 
     /// Whether the binary links against a dynamic loader / is a dylib already.
     var isAlreadyDylib: Bool
@@ -114,16 +142,22 @@ enum BundleInspector {
         // A FairPlay-encrypted binary's __TEXT is ciphertext until the kernel
         // decrypts it for the owning process. Loaded as a library there is no
         // such decryption step, so the first instruction fetch faults.
+        //
+        // The reliable test is the *content* of the command, not its presence:
+        // every Xcode-linked binary has one with cryptid == 0, and decrypted
+        // dumps keep it that way. Only the App Store flow sets cryptid = 1.
         var encrypted = false
+        var encryptionSummary: EncryptionSummary?
         if let image = try? MachOImage(contentsOf: executableURL) {
-            encrypted = image.loadCommands.contains { entry in
-                // LC_ENCRYPTION_INFO (0x21) and LC_ENCRYPTION_INFO_64 (0x2C)
-                entry.cmd == 0x21 || entry.cmd == 0x2C
-            }
-            if encrypted {
-                warnings.append(
-                    "该二进制的 __TEXT 段处于加密状态（App Store 下载的 IPA 通常如此）。"
-                    + "在 Luna 中加载会失败 —— 请使用已解密的 IPA。")
+            if let enc = image.encryptionInfo() {
+                encrypted = enc.isEncrypted
+                encryptionSummary = EncryptionSummary(enc)
+                if encrypted {
+                    warnings.append(
+                        "主二进制为 FairPlay 加密（cryptid=\(enc.cryptid)，"
+                        + "加密区 \(enc.cryptsize) 字节）。Luna 无法解密 —— "
+                        + "请使用已解密（脱壳）的 IPA 或开发者直签的构建。")
+                }
             }
         } else {
             warnings.append("无法解析主可执行文件，可能不是有效的 Mach-O。")
@@ -196,6 +230,7 @@ enum BundleInspector {
             bundleURL: bundleURL,
             bundleSize: size,
             isEncrypted: encrypted,
+            encryptionSummary: encryptionSummary,
             isAlreadyDylib: alreadyDylib,
             warnings: warnings
         )

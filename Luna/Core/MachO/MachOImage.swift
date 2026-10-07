@@ -58,6 +58,30 @@ struct PageZeroSegment {
     let vmSize: UInt64
 }
 
+/// The `LC_ENCRYPTION_INFO` / `LC_ENCRYPTION_INFO_64` payload, if present.
+struct EncryptionInfo {
+    /// Absolute byte offset of the command inside the file buffer.
+    let commandOffset: Int
+    /// Offset of the encrypted region within the file.
+    let cryptoff: UInt32
+    /// Size of the encrypted region. Linkers reserve this command even for
+    /// binaries that were never distributed through the App Store, where it
+    /// reads as a non-zero reserved size with `cryptid == 0` — see
+    /// `isEncrypted`.
+    let cryptsize: UInt32
+    /// 1 for App Store distribution (FairPlay), 0 otherwise.
+    let cryptid: UInt32
+
+    /// The only reliable encryption test.
+    ///
+    /// Every Xcode-linked iOS binary carries this load command with
+    /// `cryptid == 0` — presence of the command alone means nothing, and
+    /// treating it as "encrypted" misflags every self-built and decrypted
+    /// (dumped) IPA. `cryptsize` is checked alongside `cryptid` so a
+    /// zero-length region can never read as encrypted.
+    var isEncrypted: Bool { cryptid != 0 && cryptsize != 0 }
+}
+
 /// Read-only analysis of a Mach-O binary.
 ///
 /// Usage:
@@ -250,6 +274,35 @@ struct MachOImage {
                   let vmsize = reader.u64(at: base + 32)
             else { continue }
             return PageZeroSegment(commandOffset: base, vmAddress: vmaddr, vmSize: vmsize)
+        }
+        return nil
+    }
+
+    /// Locates the encryption info command and decodes its fields.
+    ///
+    /// `encryption_info_command` / `encryption_info_command_64` layout:
+    ///   0  cmd        4
+    ///   4  cmdsize    4   (16 / 20; some linkers pad to 24 — never relied on)
+    ///   8  cryptoff   4
+    ///  12  cryptsize  4
+    ///  16  cryptid    4
+    ///
+    /// The three payload fields are shared by both command variants, so one
+    /// decoder serves the 32-bit and the 64-bit form.
+    func encryptionInfo() -> EncryptionInfo? {
+        let reader = ByteReader(data)
+        for entry in loadCommands
+        where entry.cmd == MachOEncryption.infoCommand
+            || entry.cmd == MachOEncryption.infoCommand64 {
+            guard let cryptoff = reader.u32(at: entry.range.lowerBound + 8),
+                  let cryptsize = reader.u32(at: entry.range.lowerBound + 12),
+                  let cryptid = reader.u32(at: entry.range.lowerBound + 16)
+            else { continue }
+            return EncryptionInfo(
+                commandOffset: entry.range.lowerBound,
+                cryptoff: cryptoff,
+                cryptsize: cryptsize,
+                cryptid: cryptid)
         }
         return nil
     }

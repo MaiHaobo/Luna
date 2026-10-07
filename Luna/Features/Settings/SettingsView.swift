@@ -213,6 +213,7 @@ struct AboutView: View {
             Section("不能做什么") {
                 bullet("上架 App Store —— 违反审核指南 2.5.2", negative: true)
                 bullet("在未获得 JIT 权限的设备上映射 guest 代码", negative: true)
+                bullet("解密 FairPlay 加密的 IPA —— 系统密钥不可及，请使用已解密（脱壳）的构建", negative: true)
                 bullet("验证第三方 IPA 的代码签名或合法性", negative: true)
                 bullet("隔离 guest 之间的文件访问", negative: true)
             }

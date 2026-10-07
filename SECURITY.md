@@ -21,7 +21,7 @@ Luna 运行第三方代码。这份文档说明它实际提供了什么保护、
 | 恶意 IPA 通过 `../` 路径写出容器外（Zip-Slip） | `IPAArchive.isSafeEntryPath` 在写任何一个字节之前校验每个条目路径，拒绝绝对路径、`..` 组件和反斜杠 |
 | guest 容器被静默篡改 | 导入时记录主可执行文件的 SHA-256，展示在详情页 |
 | 用户在不知情下运行危险内容 | 首次启动前强制通过信任确认页，逐条列出风险 |
-| 加密二进制导致的崩溃式失败 | 导入时检测 `LC_ENCRYPTION_INFO`，直接标记为不可运行而非留到启动时崩 |
+| 真加密二进制导致的崩溃式失败 | 解析 `LC_ENCRYPTION_INFO` 的 cryptid/cryptsize 判定——仅真正 FairPlay 加密（cryptid≠0）才拦截；带命令但 cryptid=0 的自编译与已解密 IPA 正常放行，导入时展示加密参数 |
 | 凭据通过 Luna 自身的仓库泄漏 | CI 在构建前扫描是否有具体 Team ID 或私钥被提交 |
 | 未经验证的 guest 之间凭据互串 | 128 个 Keychain 访问组，按 Bundle ID 确定性分配 |
 

@@ -227,6 +227,7 @@ final class GuestStore: ObservableObject {
                 patchSummary: nil,
                 lastError: nil,
                 warnings: finalInspection.warnings,
+                encryption: finalInspection.encryptionSummary,
                 keychainGroupIndex: KeychainGroupAllocator.groupIndex(
                     forBundleID: finalInspection.bundleIdentifier),
                 bundleSize: directorySize(liftedBundle),
@@ -321,6 +322,30 @@ final class GuestStore: ObservableObject {
         updated.lastError = nil
         try? FileManager.default.removeItem(at: guest.patchedDirectoryURL)
         update(updated)
+    }
+
+    /// Re-runs bundle inspection and refreshes the derived fields.
+    ///
+    /// Exists because the checks themselves evolve: the first release flagged
+    /// every binary that merely carried an `LC_ENCRYPTION_INFO` command as
+    /// encrypted, which misflagged decrypted dumps and self-built IPAs. Guests
+    /// imported by that build keep the stale warning in their manifest record;
+    /// re-inspection recomputes it against the current logic without asking
+    /// the user to delete and re-import a multi-gigabyte bundle.
+    func reinspect(_ guest: GuestApp) {
+        do {
+            let inspection = try BundleInspector.inspect(bundleURL: guest.bundleURL)
+            var updated = guest
+            updated.warnings = inspection.warnings
+            updated.encryption = inspection.encryptionSummary
+            updated.bundleSize = directorySize(guest.bundleURL)
+            updated.lastError = nil
+            update(updated)
+        } catch {
+            var updated = guest
+            updated.lastError = "重新检测失败：\(error.localizedDescription)"
+            update(updated)
+        }
     }
 
     private func removeStorage(for guest: GuestApp) {
