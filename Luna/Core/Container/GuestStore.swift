@@ -182,7 +182,11 @@ final class GuestStore: ObservableObject {
                 throw IPAError.emptyPayloadDirectory
             }
 
-            let inspection = try BundleInspector.inspect(bundleURL: mainBundle)
+            // Inspect once against the pre-lift location purely as a validity
+            // gate — a bundle whose Info.plist or executable is missing should
+            // fail before anything is moved. The values recorded below come
+            // from the re-inspection after the lift, so every path is correct.
+            _ = try BundleInspector.inspect(bundleURL: mainBundle)
 
             // The bundle arrived at `<storage>/Payload/X.app`, but `bundleURL`
             // derives `<storage>/X.app`, so lift it one level and drop the

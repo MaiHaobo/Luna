@@ -17,6 +17,7 @@
 import Foundation
 import Darwin
 import ObjectiveC
+import MachO
 
 // MARK: - Writable memory
 
@@ -52,18 +53,26 @@ enum WritableExecutableMemory {
     /// caller. Returns false rather than throwing because every call site
     /// treats failure as "fall back", not "abort".
     ///
-    /// `VM_PROT_COPY` is included because these pages belong to a mapped
-    /// image; without it the protection change either fails or would write
-    /// through to the shared mapping.
+    /// `mprotect` rather than `task_vm_protect`: the latter is not exported to
+    /// app-land on iOS, whereas `mprotect` is the call the platform expects and
+    /// the one whose failure mode (EPERM without a debugging entitlement) is
+    /// exactly the signal we want.
+    ///
+    /// The pages belong to a mapped image, so the protection is applied to a
+    /// page-aligned range — `mprotect` rejects a misaligned address outright.
     static func makeWritable(_ address: UnsafeMutableRawPointer, count: Int) -> Bool {
         guard isAvailable else { return false }
-        let result = task_vm_protect(
-            mach_task_self_,
-            mach_vm_address_t(UInt(bitPattern: address)),
-            mach_vm_size_t(count),
-            VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY
-        )
-        return result == KERN_SUCCESS
+        let pageSize = Int(getpagesize())
+        let start = UInt(bitPattern: address)
+        let alignedStart = start & ~UInt(pageSize - 1)
+        let end = start + UInt(count)
+        let alignedEnd = (end + UInt(pageSize - 1)) & ~UInt(pageSize - 1)
+        let length = Int(alignedEnd - alignedStart)
+
+        guard let region = UnsafeMutableRawPointer(bitPattern: alignedStart) else {
+            return false
+        }
+        return mprotect(region, length, PROT_READ | PROT_WRITE) == 0
     }
 }
 
@@ -85,7 +94,7 @@ enum ExecutablePathRedirect {
 
         // A nil buffer is the documented way to ask how much room the path
         // needs; dyld writes that capacity into `size`.
-        _ = _NSGetExecutablePath(nil, &size)
+        _ = _NSGetExecutablePath(nil as UnsafeMutablePointer<CChar>?, &size)
         guard size > 0 else { throw RedirectError.noPathBuffer }
 
         var buffer = [CChar](repeating: 0, count: Int(size))

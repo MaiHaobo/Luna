@@ -37,6 +37,7 @@
 
 import Foundation
 import Darwin
+import MachO
 
 // MARK: - Result reporting
 
