@@ -43,6 +43,10 @@ MARKETING_VERSION = 1.0.1;
 | --- | --- |
 | （无） | 早期构建，产物名统一是 `Luna-unsigned.ipa`，无法区分 |
 | **1.0.1** | 起用版本化命名的第一个版本 |
+| **1.1.0** | 导入收件夹（`Documents/Import`），导入成功后归档到 `Import/Imported/` |
+| **1.2.0** | 修正加密误报：按 `cryptid`/`cryptsize` 判定，而非「存在 `LC_ENCRYPTION_INFO` 命令」 |
+| **1.3.0** | 运行时加载器：`dlopen` 加载 guest 镜像、进程身份重定向、入口点解析 |
+| **1.4.0** | 代码签名阶段一：adhoc 签名的完整链路（CodeDirectory / SuperBlob / `_CodeSignature`） |
 
 `CURRENT_PROJECT_VERSION`（build 号）保持为 `1`，目前不参与命名。
 

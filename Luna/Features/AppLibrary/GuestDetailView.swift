@@ -39,6 +39,8 @@ struct GuestDetailView: View {
 
                 binaryStatusSection
 
+                signatureSection
+
                 Section("容器") {
                     row("Guest 文件夹", current.storageDescription, monospaced: true)
                     row("数据文件夹", current.dataFolderName, monospaced: true)
@@ -73,6 +75,12 @@ struct GuestDetailView: View {
                     } label: {
                         Label("重新检测", systemImage: "arrow.clockwise.circle")
                     }
+                    Button {
+                        Task { await store.resign(current) }
+                    } label: {
+                        Label("签名 / 重签名", systemImage: "signature")
+                    }
+                    .disabled(store.signingStage != nil)
                     Button {
                         store.repatch(current)
                     } label: {
@@ -153,6 +161,57 @@ struct GuestDetailView: View {
 
     private func byteCount(_ bytes: UInt32) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    /// The code signature Luna wrote over the guest's bundle.
+    ///
+    /// Shown separately from the FairPlay state because the two answer
+    /// different questions: FairPlay is about whether the *original* binary can
+    /// be decrypted at all, whereas this is about whether Luna has produced a
+    /// loadable, signed copy.
+    @ViewBuilder
+    private var signatureSection: some View {
+        Section {
+            if let stage = store.signingStage {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text(stage)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+            } else if let signature = current.signature {
+                HStack {
+                    Label(signature.label,
+                          systemImage: signature.isAdHoc
+                            ? "checkmark.seal" : "checkmark.seal.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(signature.isAdHoc ? Color.orange : Color.green)
+                    Spacer()
+                }
+                row("已签名二进制", "\(signature.binaryCount) 个")
+                row("资源封条", "\(signature.resourceCount) 个文件")
+                row("签名时间", signature.signedAt.formatted(
+                    date: .abbreviated, time: .shortened))
+                if let cdhash = signature.mainCdhash {
+                    row("主二进制 cdhash", String(cdhash.prefix(24)) + "…", monospaced: true)
+                }
+            } else {
+                Label("未签名", systemImage: "questionmark.circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("代码签名")
+        } footer: {
+            if current.signature == nil {
+                Text("Luna 尚未为该 guest 生成签名。点下方「签名 / 重签名」执行。"
+                     + "当前阶段产出的是 adhoc 签名（无证书），"
+                     + "配合 JIT 权限即可加载；证书签名将在后续阶段接入。")
+            } else if current.signature?.isAdHoc == true {
+                Text("adhoc 签名不含证书，系统不会基于签名放行加载 —— "
+                     + "仍需 JIT 权限。接入证书签名后可在免 JIT 环境下加载。")
+            }
+        }
     }
 
     private var warningsSection: some View {

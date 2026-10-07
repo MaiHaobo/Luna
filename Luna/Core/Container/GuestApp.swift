@@ -18,6 +18,8 @@ enum GuestState: String, Codable {
     case imported
     /// Binary patched; ready to be handed to the loader.
     case ready
+    /// Patched and signed; ready to load without a JIT entitlement.
+    case signed
     /// A launch is in flight.
     case launching
     /// Last launch succeeded at least once.
@@ -29,10 +31,33 @@ enum GuestState: String, Codable {
         switch self {
         case .imported: return "已导入"
         case .ready: return "待启动"
+        case .signed: return "已签名"
         case .launching: return "启动中"
         case .launched: return "已运行过"
         case .failed: return "失败"
         }
+    }
+}
+
+/// A record of the signature Luna wrote over a guest's bundle.
+///
+/// Stored rather than recomputed because producing it means hashing every
+/// resource in the bundle — expensive enough that the detail screen should not
+/// pay for it on every redraw.
+struct SignatureSummary: Codable, Hashable {
+    /// True when the signature carries no certificate (`CS_ADHOC`).
+    var isAdHoc: Bool
+    /// Number of Mach-O files that were signed.
+    var binaryCount: Int
+    /// Number of resource files hashed into the seal.
+    var resourceCount: Int
+    /// When the signature was produced.
+    var signedAt: Date
+    /// `cdhash` of the main binary's CodeDirectory, hex encoded.
+    var mainCdhash: String?
+
+    var label: String {
+        isAdHoc ? "adhoc（无证书）" : "证书签名"
     }
 }
 
@@ -83,6 +108,13 @@ struct GuestApp: Identifiable, Codable, Hashable {
     /// synthesized `Codable` treats a missing key as `nil`, so old manifests
     /// keep decoding. The detail screen's re-inspection fills it in.
     var encryption: EncryptionSummary?
+
+    /// The signature Luna wrote over the guest's bundle, if any.
+    ///
+    /// `nil` means either "never signed" or "signed by a build that predates
+    /// this field" — the two are indistinguishable in the manifest, and both
+    /// are fixed the same way: press re-sign.
+    var signature: SignatureSummary?
 
     /// Keychain access group index assigned to this guest for semi-isolation.
     var keychainGroupIndex: Int
@@ -145,6 +177,14 @@ struct GuestApp: Identifiable, Codable, Hashable {
     /// change between releases and once misflagged every Xcode-linked binary.
     var hasBlockingWarning: Bool {
         encryption?.isEncrypted == true
+    }
+
+    /// Whether a signature has been written for this guest.
+    var isSigned: Bool { signature != nil }
+
+    /// The signed bundle produced by the last patch-and-sign pass, if present.
+    var signedBundleURL: URL {
+        patchedDirectoryURL.appendingPathComponent(bundleFolderName, isDirectory: true)
     }
 }
 

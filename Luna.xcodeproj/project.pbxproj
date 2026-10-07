@@ -15,6 +15,13 @@
 		181C62EDE9713F0229C9CB4F /* GuestLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F8536A5B515DF34A73B48A; };
 		220E92D4E75CAF04482C2B03 /* DyldImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D38FF07A22804ED5536281B3; };
 		4DC24CA79253BF7EB679D87F /* ProcessRedirects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 365B1B4FE1C64B0CB0910C80; };
+		437E1E9E2F841D60B760C908 /* GuestResigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F58FE9A2373E1EB50B29D3E; };
+		2D079EA226E3895E93C4EEB9 /* ASN1Writer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0FE1E6A1F0B787EDFAEE958; };
+		2C107F7A7844073B23EF6288 /* CodeDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8841B07F9FC373F4CDDA99AD; };
+		35BBB7D2D47460A4276AC00A /* CodeSignatureBlob.swift in Sources */ = {isa = PBXBuildFile; fileRef = B361E91E3A3B4D236C6764D2; };
+		F82E8127EF72E3D2AAB14C04 /* MachOCodeSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA3960A16A1CEA6BB46F8C52; };
+		378F43FFCE2A8CDE0D39F71C /* BundleSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FB1715F9ADD02BDE577A7DE; };
+		D241ECBA8D81CBF3F4B825C4 /* ZIPWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86CD1DFB8C968AAE13BCBC6F; };
 		133167CC8ACD869CDA95D030 /* MachODefines.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92629C298485339C6A9288F1; };
 		5C3B91E605A8F2CBA759C0A2 /* MachOImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1F4567CF3C6E04296469C1; };
 		EADCF738097ADCC5856956E2 /* MachOPatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF05746F28A5BB8B55816138; };
@@ -41,6 +48,13 @@
 		13F8536A5B515DF34A73B48A /* GuestLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuestLoader.swift; sourceTree = "<group>"; };
 		D38FF07A22804ED5536281B3 /* DyldImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DyldImageLoader.swift; sourceTree = "<group>"; };
 		365B1B4FE1C64B0CB0910C80 /* ProcessRedirects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRedirects.swift; sourceTree = "<group>"; };
+		6F58FE9A2373E1EB50B29D3E /* GuestResigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuestResigner.swift; sourceTree = "<group>"; };
+		C0FE1E6A1F0B787EDFAEE958 /* ASN1Writer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASN1Writer.swift; sourceTree = "<group>"; };
+		8841B07F9FC373F4CDDA99AD /* CodeDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeDirectory.swift; sourceTree = "<group>"; };
+		B361E91E3A3B4D236C6764D2 /* CodeSignatureBlob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeSignatureBlob.swift; sourceTree = "<group>"; };
+		FA3960A16A1CEA6BB46F8C52 /* MachOCodeSigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachOCodeSigner.swift; sourceTree = "<group>"; };
+		3FB1715F9ADD02BDE577A7DE /* BundleSigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundleSigner.swift; sourceTree = "<group>"; };
+		86CD1DFB8C968AAE13BCBC6F /* ZIPWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZIPWriter.swift; sourceTree = "<group>"; };
 		92629C298485339C6A9288F1 /* MachODefines.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachODefines.swift; sourceTree = "<group>"; };
 		7B1F4567CF3C6E04296469C1 /* MachOImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachOImage.swift; sourceTree = "<group>"; };
 		EF05746F28A5BB8B55816138 /* MachOPatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachOPatcher.swift; sourceTree = "<group>"; };
@@ -158,6 +172,13 @@
 		EAA2BDA2158BCA8E269B10A3 /* Signing */ = {
 			isa = PBXGroup;
 			children = (
+				C0FE1E6A1F0B787EDFAEE958 /* ASN1Writer.swift */,
+				8841B07F9FC373F4CDDA99AD /* CodeDirectory.swift */,
+				B361E91E3A3B4D236C6764D2 /* CodeSignatureBlob.swift */,
+				FA3960A16A1CEA6BB46F8C52 /* MachOCodeSigner.swift */,
+				3FB1715F9ADD02BDE577A7DE /* BundleSigner.swift */,
+				86CD1DFB8C968AAE13BCBC6F /* ZIPWriter.swift */,
+				6F58FE9A2373E1EB50B29D3E /* GuestResigner.swift */,
 			);
 			path = Signing;
 			sourceTree = "<group>";
@@ -310,6 +331,13 @@
 				181C62EDE9713F0229C9CB4F /* GuestLoader.swift in Sources */,
 				220E92D4E75CAF04482C2B03 /* DyldImageLoader.swift in Sources */,
 				4DC24CA79253BF7EB679D87F /* ProcessRedirects.swift in Sources */,
+				437E1E9E2F841D60B760C908 /* GuestResigner.swift in Sources */,
+				2D079EA226E3895E93C4EEB9 /* ASN1Writer.swift in Sources */,
+				2C107F7A7844073B23EF6288 /* CodeDirectory.swift in Sources */,
+				35BBB7D2D47460A4276AC00A /* CodeSignatureBlob.swift in Sources */,
+				F82E8127EF72E3D2AAB14C04 /* MachOCodeSigner.swift in Sources */,
+				378F43FFCE2A8CDE0D39F71C /* BundleSigner.swift in Sources */,
+				D241ECBA8D81CBF3F4B825C4 /* ZIPWriter.swift in Sources */,
 				C587DB02581E00D68B17EDA1 /* LoaderRegistry.swift in Sources */,
 				133167CC8ACD869CDA95D030 /* MachODefines.swift in Sources */,
 				5C3B91E605A8F2CBA759C0A2 /* MachOImage.swift in Sources */,
@@ -403,7 +431,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.0;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.luna.container;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -435,7 +463,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.0;
+				MARKETING_VERSION = 1.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.luna.container;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";

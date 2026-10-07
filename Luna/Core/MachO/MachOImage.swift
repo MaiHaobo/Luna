@@ -364,4 +364,84 @@ struct MachOImage {
 
     /// True when the binary is already a dylib (i.e. already patched).
     var isAlreadyDylib: Bool { fileType == MachOFileType.dylib }
+
+    // MARK: - Segment queries
+
+    /// A `LC_SEGMENT_64`'s address and size, for the fields the code signature
+    /// needs and for the segment table in the inspector.
+    ///
+    /// `segment_command_64` layout (offsets used below):
+    ///   0  cmd            4
+    ///   4  cmdsize        4
+    ///   8  segname       16
+    ///  24  vmaddr         8
+    ///  32  vmsize         8
+    ///  40  fileoff        8
+    ///  48  filesize       8
+    struct Segment {
+        let name: String
+        let commandOffset: Int
+        let vmAddress: UInt64
+        let vmSize: UInt64
+        let fileOffset: UInt64
+        let fileSize: UInt64
+    }
+
+    /// The segment named `name`, or `nil`.
+    func segment(named name: String) -> Segment? {
+        let reader = ByteReader(data)
+        for entry in loadCommands where entry.cmd == MachOLoadCommand.segment64 {
+            let base = entry.range.lowerBound
+            guard let segname = reader.cString(at: base + 8, maxLength: 16),
+                  segname == name,
+                  let vmaddr = reader.u64(at: base + 24),
+                  let vmsize = reader.u64(at: base + 32),
+                  let fileoff = reader.u64(at: base + 40),
+                  let filesize = reader.u64(at: base + 48)
+            else { continue }
+            return Segment(
+                name: segname,
+                commandOffset: base,
+                vmAddress: vmaddr,
+                vmSize: vmsize,
+                fileOffset: fileoff,
+                fileSize: filesize)
+        }
+        return nil
+    }
+
+    /// Byte offset of a segment's `segment_command_64` structure.
+    func segmentCommandOffset(named name: String) -> Int? {
+        segment(named: name)?.commandOffset
+    }
+
+    // MARK: - Code signature
+
+    /// The `LC_CODE_SIGNATURE` payload.
+    ///
+    /// `linkedit_data_command` layout:
+    ///   0  cmd        4   = 0x1D
+    ///   4  cmdsize    4   = 16
+    ///   8  dataoff    4   file offset of the signature blob
+    ///  12  datasize   4   byte length of the signature blob
+    struct CodeSignatureCommand {
+        /// Byte offset of the command structure itself.
+        let commandOffset: Int
+        let dataOff: UInt32
+        let dataSize: UInt32
+    }
+
+    func codeSignatureCommand() -> CodeSignatureCommand? {
+        let reader = ByteReader(data)
+        for entry in loadCommands where entry.cmd == MachOLoadCommand.codeSignature {
+            guard let dataoff = reader.u32(at: entry.range.lowerBound + 8),
+                  let datasize = reader.u32(at: entry.range.lowerBound + 12)
+            else { continue }
+            return CodeSignatureCommand(
+                commandOffset: entry.range.lowerBound,
+                dataOff: dataoff,
+                dataSize: datasize)
+        }
+        return nil
+    }
 }

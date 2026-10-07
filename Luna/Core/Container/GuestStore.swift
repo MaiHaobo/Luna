@@ -352,6 +352,70 @@ final class GuestStore: ObservableObject {
         }
     }
 
+    // MARK: - Signing
+
+    /// Live signing progress, `nil` when idle.
+    @Published private(set) var signingStage: String?
+
+    /// Patches and signs `guest`, recording the outcome on its manifest record.
+    ///
+    /// The heavy work runs off the main actor: signing hashes every page of
+    /// every binary and every resource in the bundle, which on a large app is
+    /// seconds of CPU. Only the published-state updates hop back.
+    ///
+    /// Returns `true` when a signature was written. Failure is recorded in
+    /// `lastError` rather than thrown, because the caller is a button.
+    @discardableResult
+    func resign(_ guest: GuestApp) async -> Bool {
+        signingStage = "准备签名…"
+        defer { signingStage = nil }
+
+        do {
+            let report = try await Self.performResignOffMainActor(
+                guest: guest,
+                progress: { [weak self] line in
+                    Task { @MainActor in self?.signingStage = line }
+                })
+
+            var updated = guest
+            updated.state = .signed
+            updated.signature = SignatureSummary(
+                isAdHoc: report.isAdHoc,
+                binaryCount: report.signature.signedBinaries.count,
+                resourceCount: report.signature.resourceCount,
+                signedAt: Date(),
+                mainCdhash: nil)
+            updated.lastError = nil
+            update(updated)
+            return true
+        } catch {
+            var updated = guest
+            updated.lastError = "签名失败：\(error.localizedDescription)"
+            update(updated)
+            NSLog("[Luna] resign failed: \(error)")
+            return false
+        }
+    }
+
+    /// Runs `GuestResigner` on a background thread.
+    ///
+    /// `GuestResigner.resign` is a plain synchronous function over files and
+    /// `Data`, so it is safe to hand to a detached task — but it must be
+    /// `nonisolated` to be callable from one, hence the static helper rather
+    /// than a method on this `@MainActor` class.
+    nonisolated private static func performResignOffMainActor(
+        guest: GuestApp,
+        progress: @escaping (String) -> Void
+    ) async throws -> ResignReport {
+        try await Task.detached(priority: .userInitiated) {
+            // `GuestApp` is a value type, so capturing it here copies; the
+            // detached task therefore never touches main-actor state.
+            try GuestResigner.resign(
+                guest: guest,
+                progress: { line in progress(line) })
+        }.value
+    }
+
     private func removeStorage(for guest: GuestApp) {
         try? FileManager.default.removeItem(at: guest.bundleURL)
         try? FileManager.default.removeItem(at: guest.patchedDirectoryURL)

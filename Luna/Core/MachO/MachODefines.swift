@@ -74,6 +74,8 @@ enum MachOLoadCommand {
     static let reexportDylib: UInt32 = 0x8000_001F
     static let lazyLoadDylib: UInt32 = 0x20
     static let main: UInt32 = 0x8000_0028
+    /// `linkedit_data_command` pointing at the code signature blob.
+    static let codeSignature: UInt32 = 0x1D
 
     /// Human-readable name, used by the inspector UI.
     static func name(of cmd: UInt32) -> String {
