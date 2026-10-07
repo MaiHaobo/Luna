@@ -282,6 +282,18 @@ jobs:
           * \`Luna.entitlements\` deliberately omits \`get-task-allow\`, so ad-hoc
             and free-account signing both work.
 
+          ## Importing IPA files with the Files app
+
+          Luna also watches an import folder inside its own sandbox:
+
+          1. Open the **Files** app on your device.
+          2. Go to **On My iPhone → Luna → Import**.
+          3. Copy any .ipa files there with any file manager you like.
+          4. The next time Luna starts, comes back to the foreground, or you
+             pull down on the library to refresh, every IPA in that folder is
+             imported automatically and moved to Import/Imported/.
+          5. Files that fail stay in Import so you can fix and retry them.
+
           ## First run
 
           1. Launch Luna.

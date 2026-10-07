@@ -10,6 +10,7 @@ struct LunaApp: App {
 
     @StateObject private var store = GuestStore()
     @StateObject private var coordinator: SessionCoordinator
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         // `GuestStore` has to exist before the coordinator, which needs it for
@@ -24,7 +25,15 @@ struct LunaApp: App {
             RootView()
                 .environmentObject(store)
                 .environmentObject(coordinator)
-                .task { store.bootstrap() }
+                .task {
+                    store.bootstrap()
+                    await store.scanImportInbox()
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active {
+                        Task { await store.scanImportInbox() }
+                    }
+                }
         }
     }
 }

@@ -56,7 +56,9 @@ struct AppLibraryView: View {
                 switch result {
                 case .success(let urls):
                     guard let url = urls.first else { return }
-                    Task { await store.importIPA(from: url) }
+                    if !await store.importIPA(from: url) {
+                        alertMessage = "已有导入正在进行，请稍候再试。"
+                    }
                 case .failure(let error):
                     alertMessage = error.localizedDescription
                 }
@@ -136,6 +138,7 @@ struct AppLibraryView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .refreshable { await store.scanImportInbox() }
     }
 
     private func launch(_ guest: GuestApp) async {
@@ -152,7 +155,7 @@ struct AppLibraryView: View {
         ContentUnavailableView {
             Label("还没有应用", systemImage: "square.stack.3d.up.slash")
         } description: {
-            Text("点击右上角 + 导入一个 IPA 文件。Luna 会解压、检查并准备它的运行环境。")
+            Text("点击右上角 + 选择 IPA，或用「文件」App 把 IPA 放到 Luna 的 Import 文件夹里，回到 Luna 会自动导入。")
         } actions: {
             Button("导入 IPA") { isImporterPresented = true }
                 .buttonStyle(.borderedProminent)

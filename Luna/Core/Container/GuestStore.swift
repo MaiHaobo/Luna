@@ -43,6 +43,11 @@ final class GuestStore: ObservableObject {
     /// Live import progress, `nil` when idle.
     @Published private(set) var importStage: ImportStage?
 
+    /// True while an import (manual or inbox scan) is running. One at a
+    /// time: the extraction pipeline is heavy, and two concurrent imports
+    /// would fight over the manifest bookkeeping and the progress banner.
+    @Published private(set) var isImporting = false
+
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -104,9 +109,26 @@ final class GuestStore: ObservableObject {
 
     /// Imports an IPA from an arbitrary URL (Files, share sheet, AirDrop).
     ///
+    /// Returns `false` immediately when another import is already running —
+    /// no queueing. The picker path turns that into an alert; the inbox scan
+    /// simply skips and catches the files on the next foreground. Marked
+    /// `@discardableResult` so fire-and-forget call sites
+    /// (`Task { await store.importIPA(from: url) }`) stay legal.
+    @discardableResult
+    func importIPA(from sourceURL: URL) async -> Bool {
+        guard !isImporting else { return false }
+        isImporting = true
+        defer { isImporting = false }
+        return await performImport(from: sourceURL)
+    }
+
+    /// The actual pipeline. Separate from `importIPA` because the inbox scan
+    /// holds `isImporting` for a whole batch of files and must reach the
+    /// per-file work without re-taking the flag between them.
+    ///
     /// Runs entirely off the main actor except for the published-state updates,
     /// so a multi-gigabyte IPA does not freeze the UI.
-    func importIPA(from sourceURL: URL) async {
+    private func performImport(from sourceURL: URL) async -> Bool {
         importStage = .staging
 
         // Copy into our own staging area first. The incoming URL is usually a
@@ -232,15 +254,44 @@ final class GuestStore: ObservableObject {
             try? FileManager.default.removeItem(at: stagingURL)
 
             importStage = .finished(guest)
+            return true
         } catch {
             try? FileManager.default.removeItem(at: stagingURL)
             importStage = .failed(error.localizedDescription)
             NSLog("[Luna] import failed: \(error)")
+            return false
         }
     }
 
     /// Clears a finished/failed import banner.
     func clearImportStage() { importStage = nil }
+
+    // MARK: - Import inbox
+
+    /// Imports every IPA waiting in `Documents/Import`.
+    ///
+    /// Runs at launch, on every foreground, and on pull-to-refresh — the
+    /// moments at which a user could have just dropped files in from another
+    /// file manager. The whole batch holds `isImporting` once, so a scan can
+    /// never interleave with a picker import; if one is already running the
+    /// scan is skipped outright and the next foreground catches the files.
+    ///
+    /// Per file: success moves it into `Import/Imported/`, failure leaves it
+    /// in place — the banner carries the reason, and the user can fix the IPA
+    /// and try again. The banner reflects each file in turn and ends on the
+    /// last one's result.
+    func scanImportInbox() async {
+        guard !isImporting else { return }
+        let pending = ImportInboxScan.pendingFiles()
+        guard !pending.isEmpty else { return }
+        isImporting = true
+        defer { isImporting = false }
+        for file in pending {
+            if await performImport(from: file) {
+                ImportInboxScan.archive(file)
+            }
+        }
+    }
 
     // MARK: - Mutation
 
@@ -341,5 +392,78 @@ enum FileDigest {
     static func sha256(of url: URL) throws -> String {
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
         return SHA256.hash(data: data).hexString
+    }
+}
+
+// MARK: - Import inbox
+
+/// Enumerates and archives the files users drop into `Documents/Import`.
+///
+/// A caseless enum beside `FileDigest` on purpose: pure helpers over
+/// `FileManager`, no state, nothing that belongs on the store itself.
+enum ImportInboxScan {
+
+    /// IPA files ready to import, name-ordered for determinism.
+    ///
+    /// Dot-prefixed names are skipped: several file managers leave `._foo.ipa`
+    /// AppleDouble sidecars next to the real file, and importing one just
+    /// produces a confusing failure banner. Files modified within the last two
+    /// seconds are skipped too — a copy may still be mid-flight, and a
+    /// truncated zip would fail noisily; the next scan picks it up instead.
+    static func pendingFiles() -> [URL] {
+        let contents: [URL]
+        do {
+            contents = try FileManager.default.contentsOfDirectory(
+                at: LunaPaths.importInboxDirectory,
+                includingPropertiesForKeys: [
+                    .isRegularFileKey, .contentModificationDateKey,
+                ],
+                options: [.skipsHiddenFiles])
+        } catch {
+            // An absent inbox is the normal state before first launch.
+            return []
+        }
+
+        let cutoff = Date().addingTimeInterval(-2)
+        return contents
+            .filter { url in
+                guard !url.lastPathComponent.hasPrefix("."),
+                      url.pathExtension.lowercased() == "ipa",
+                      let values = try? url.resourceValues(
+                        forKeys: [.isRegularFileKey, .contentModificationDateKey]),
+                      values.isRegularFile == true
+                else { return false }
+                return values.contentModificationDate.map { $0 < cutoff } ?? true
+            }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    /// Moves a successfully imported file into `Import/Imported/`.
+    ///
+    /// Archive rather than delete: the file is the user's, and a visible copy
+    /// answers "where did my IPA go" without a trip back to the source app.
+    /// Name collisions get a timestamp suffix rather than being overwritten.
+    static func archive(_ file: URL) {
+        let fm = FileManager.default
+        let archive = LunaPaths.importInboxArchiveDirectory
+        do {
+            try fm.createDirectory(at: archive, withIntermediateDirectories: true)
+            var destination = archive.appendingPathComponent(file.lastPathComponent)
+            if fm.fileExists(atPath: destination.path) {
+                let stamp = DateFormatter()
+                stamp.dateFormat = "-yyyyMMdd-HHmmss"
+                let base = file.deletingPathExtension().lastPathComponent
+                destination = archive.appendingPathComponent(
+                    base + stamp.string(from: Date()))
+                    .appendingPathExtension("ipa")
+            }
+            try fm.moveItem(at: file, to: destination)
+        } catch {
+            // Archiving is a courtesy, not part of the import. If it fails the
+            // file stays in the inbox and would be imported again on the next
+            // scan — which replaces the existing guest, so it is harmless.
+            NSLog("[Luna] could not archive %@: %@",
+                  file.lastPathComponent, error.localizedDescription)
+        }
     }
 }

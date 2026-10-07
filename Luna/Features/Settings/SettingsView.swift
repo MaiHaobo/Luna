@@ -38,6 +38,7 @@ struct SettingsView: View {
                 }
 
                 Section("容器路径") {
+                    pathRow("导入收件夹", LunaPaths.importInboxDirectory.path)
                     pathRow("根目录", LunaPaths.root.path)
                     pathRow("Guest 数据", LunaPaths.guestDataDirectory.path)
                     pathRow("修补产物", LunaPaths.patchedDirectory.path)
