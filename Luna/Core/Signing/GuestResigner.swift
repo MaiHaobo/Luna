@@ -97,7 +97,16 @@ enum GuestResigner {
             .appendingPathComponent(guest.bundleFolderName, isDirectory: true)
 
         progress?("复制 bundle…")
-        try fm.copyItem(at: guest.bundleURL, to: stagedBundle)
+        do {
+            try stageCopy(from: guest.bundleURL, to: stagedBundle,
+                          bundleSize: guest.bundleSize)
+        } catch {
+            throw CodeSignError.signingFailed(describeCopyFailure(
+                error,
+                source: guest.bundleURL,
+                destination: stagedBundle,
+                bundleSize: guest.bundleSize))
+        }
 
         guard fm.fileExists(atPath: stagedBundle.path) else {
             throw CodeSignError.signingFailed(
@@ -141,5 +150,103 @@ enum GuestResigner {
             signature: signature,
             isAdHoc: true
         )
+    }
+
+    // MARK: - Staging
+
+    /// `clonefile(2)` — APFS copy-on-write tree clone. Not in the Swift Darwin
+    /// overlay, so it is bound directly; it has existed on iOS since the
+    /// switch to APFS.
+    @_silgen_name("clonefile")
+    private static func systemClonefile(
+        _ source: UnsafePointer<CChar>,
+        _ destination: UnsafePointer<CChar>,
+        _ flags: Int32
+    ) -> Int32
+
+    /// Stages `source` at `destination`.
+    ///
+    /// An APFS clone is tried first: it is instant and copy-on-write, so a
+    /// multi-gigabyte guest (UTM unpacked runs to several GB) costs no real
+    /// space until a file is actually modified by the patch or signature pass.
+    /// A plain `copyItem` would duplicate every byte, which is how devices
+    /// with a few GB free ended up failing mid-copy with a bare Cocoa error.
+    ///
+    /// When the clone is refused (non-APFS volume, cross-device, OS policy),
+    /// the fallback checks that a deep copy would actually fit *before*
+    /// starting one, and fails with a readable diagnosis if it would not.
+    private static func stageCopy(from source: URL, to destination: URL,
+                                  bundleSize: Int64) throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: destination.path) {
+            try fm.removeItem(at: destination)
+        }
+
+        if cloneTree(from: source, to: destination) { return }
+
+        if availableCapacity(near: destination) != nil,
+           !hasRoomForCopy(bundleSize: bundleSize, destination: destination) {
+            throw CodeSignError.signingFailed(spaceShortageMessage(bundleSize: bundleSize))
+        }
+        try fm.copyItem(at: source, to: destination)
+    }
+
+    private static func cloneTree(from source: URL, to destination: URL) -> Bool {
+        source.withUnsafeFileSystemRepresentation { src in
+            destination.withUnsafeFileSystemRepresentation { dst in
+                guard let src, let dst else { return false }
+                return systemClonefile(src, dst, 0) == 0
+            }
+        }
+    }
+
+    /// Free space on the volume holding `url`, in bytes. `nil` when the
+    /// system does not say — checks are skipped rather than guessed.
+    private static func availableCapacity(near url: URL) -> Int64? {
+        let values = try? url.resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        let bytes = values?.volumeAvailableCapacityForImportantUsage ?? 0
+        return bytes > 0 ? bytes : nil
+    }
+
+    private static func hasRoomForCopy(bundleSize: Int64, destination: URL) -> Bool {
+        // Headroom covers the patched binary rewrite, every signature blob,
+        // and CodeResources — a few hundred MB over the largest code file.
+        let headroom: Int64 = 512 * 1024 * 1024
+        guard let available = availableCapacity(near: destination) else { return true }
+        return available >= bundleSize + headroom
+    }
+
+    private static func spaceShortageMessage(bundleSize: Int64) -> String {
+        String(
+            format: "磁盘空间不足：这个应用约占 %.1f GB，签名需要再占用同等空间。请删除一些应用或视频后重试。",
+            Double(bundleSize) / 1_000_000_000)
+    }
+
+    /// Turns a failed staging copy into a sentence that names the cause.
+    ///
+    /// The raw Cocoa message ("The file … couldn't be saved …") hides the
+    /// errno that matters — space, permissions, I/O — and reads as a system
+    /// quirk rather than something the user can act on.
+    private static func describeCopyFailure(_ error: Error, source: URL,
+                                            destination: URL,
+                                            bundleSize: Int64) -> String {
+        let ns = error as NSError
+        let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError
+        let code: Int? = underlying?.domain == NSPOSIXErrorDomain
+            ? underlying?.code
+            : (ns.domain == NSCocoaErrorDomain ? ns.code : nil)
+
+        switch code {
+        case 28, 640:   // ENOSPC / NSFileWriteOutOfSpaceError
+            return spaceShortageMessage(bundleSize: bundleSize)
+        case 1, 13, 513: // EPERM / EACCES / NSFileWriteNoPermissionError
+            return "没有写入权限：\(destination.path)"
+        case 516:       // NSFileWriteFileExistsError
+            return "目标已存在：\(destination.path)"
+        default:
+            let detail = underlying?.localizedDescription ?? error.localizedDescription
+            return "复制 \(source.lastPathComponent) 失败：\(detail)"
+        }
     }
 }

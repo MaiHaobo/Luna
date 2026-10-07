@@ -123,6 +123,21 @@ enum BundleSigner {
             let children = (try? fm.contentsOfDirectory(
                 at: root, includingPropertiesForKeys: nil)) ?? []
             for child in children where child.pathExtension != "dylib" {
+                // Only a directory that actually carries an Info.plist is a
+                // nested code bundle. Ships like UTM also carry plain files in
+                // `Extensions/` (e.g. `UTM.appexpt`, a placeholder not backed
+                // by any bundle) — recursing into those would try to build a
+                // `_CodeSignature` inside a file and abort the whole signing
+                // pass. Anything else here is hashed as a resource instead.
+                var isDirectory: ObjCBool = false
+                guard fm.fileExists(atPath: child.path, isDirectory: &isDirectory),
+                      isDirectory.boolValue,
+                      (try? infoPlist(of: child)) ?? nil != nil
+                else {
+                    report.skipped.append(
+                        "\(directory)/\(child.lastPathComponent)（非嵌套 bundle）")
+                    continue
+                }
                 // Each nested bundle signs with its own Info.plist identity.
                 let nestedName = try nestedExecutableName(of: child) ?? child
                     .lastPathComponent
@@ -296,7 +311,11 @@ enum BundleSigner {
             }
 
             guard values?.isRegularFile == true else { continue }
-            let data = try Data(contentsOf: itemURL, options: .mappedIfSafe)
+            // A single unreadable file (odd permissions, a dangling symlink
+            // inside an extension directory) must not abort the whole pass;
+            // it is skipped and the seal simply does not cover it.
+            guard let data = try? Data(contentsOf: itemURL, options: .mappedIfSafe)
+            else { continue }
             files[relative] = SHA1.hash(data: data).hexString
             files2[relative] = [
                 "hash": SHA1.hash(data: data).hexString,
