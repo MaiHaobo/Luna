@@ -13,6 +13,8 @@
 		65262E9142B56317187FDC62 /* GuestStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2C6904FF18FEEB28BA97440; };
 		F579E943448805EA1485FF8C /* IPAArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A205EA2C61145886951B95E; };
 		181C62EDE9713F0229C9CB4F /* GuestLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F8536A5B515DF34A73B48A; };
+		220E92D4E75CAF04482C2B03 /* DyldImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D38FF07A22804ED5536281B3; };
+		4DC24CA79253BF7EB679D87F /* ProcessRedirects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 365B1B4FE1C64B0CB0910C80; };
 		133167CC8ACD869CDA95D030 /* MachODefines.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92629C298485339C6A9288F1; };
 		5C3B91E605A8F2CBA759C0A2 /* MachOImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1F4567CF3C6E04296469C1; };
 		EADCF738097ADCC5856956E2 /* MachOPatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF05746F28A5BB8B55816138; };
@@ -37,6 +39,8 @@
 		F2C6904FF18FEEB28BA97440 /* GuestStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuestStore.swift; sourceTree = "<group>"; };
 		6A205EA2C61145886951B95E /* IPAArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPAArchive.swift; sourceTree = "<group>"; };
 		13F8536A5B515DF34A73B48A /* GuestLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuestLoader.swift; sourceTree = "<group>"; };
+		D38FF07A22804ED5536281B3 /* DyldImageLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DyldImageLoader.swift; sourceTree = "<group>"; };
+		365B1B4FE1C64B0CB0910C80 /* ProcessRedirects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRedirects.swift; sourceTree = "<group>"; };
 		92629C298485339C6A9288F1 /* MachODefines.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachODefines.swift; sourceTree = "<group>"; };
 		7B1F4567CF3C6E04296469C1 /* MachOImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachOImage.swift; sourceTree = "<group>"; };
 		EF05746F28A5BB8B55816138 /* MachOPatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachOPatcher.swift; sourceTree = "<group>"; };
@@ -125,6 +129,8 @@
 				isa = PBXGroup;
 				children = (
 				13F8536A5B515DF34A73B48A /* GuestLoader.swift */,
+				D38FF07A22804ED5536281B3 /* DyldImageLoader.swift */,
+				365B1B4FE1C64B0CB0910C80 /* ProcessRedirects.swift */,
 				C232585D56B03791407449DA /* LoaderRegistry.swift */,
 				);
 				path = Loader;
@@ -302,6 +308,8 @@
 				65262E9142B56317187FDC62 /* GuestStore.swift in Sources */,
 				F579E943448805EA1485FF8C /* IPAArchive.swift in Sources */,
 				181C62EDE9713F0229C9CB4F /* GuestLoader.swift in Sources */,
+				220E92D4E75CAF04482C2B03 /* DyldImageLoader.swift in Sources */,
+				4DC24CA79253BF7EB679D87F /* ProcessRedirects.swift in Sources */,
 				C587DB02581E00D68B17EDA1 /* LoaderRegistry.swift in Sources */,
 				133167CC8ACD869CDA95D030 /* MachODefines.swift in Sources */,
 				5C3B91E605A8F2CBA759C0A2 /* MachOImage.swift in Sources */,
@@ -395,7 +403,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.luna.container;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -427,7 +435,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.luna.container;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";

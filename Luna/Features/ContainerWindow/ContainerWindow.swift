@@ -122,6 +122,11 @@ final class ContainerSession: ObservableObject {
     @Published private(set) var logLines: [String] = []
     @Published private(set) var startedAt = Date()
 
+    /// Set when the runtime loader mapped the image. `nil` for preview
+    /// sessions, which is how the canvas knows to show the spec sheet instead
+    /// of the "image mapped" readout.
+    @Published private(set) var dyldReport: DyldLoadReport?
+
     /// Which loader produced this session.
     let loaderName: String
 
@@ -150,6 +155,13 @@ final class ContainerSession: ObservableObject {
     }
 
     func markRendering() { phase = .rendering }
+
+    /// Records a successful dyld load and moves the session to `rendering`.
+    func markLoaded(report: DyldLoadReport) {
+        dyldReport = report
+        append("镜像已映射进本进程，入口点已解析")
+        phase = .rendering
+    }
 
     func markFailed(_ message: String) {
         append("失败：\(message)")

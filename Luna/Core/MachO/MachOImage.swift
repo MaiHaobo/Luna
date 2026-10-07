@@ -307,6 +307,27 @@ struct MachOImage {
         return nil
     }
 
+    /// The `LC_MAIN` entry offset, relative to the image's load address.
+    ///
+    /// `LC_MAIN` layout:
+    ///   0  cmd        4   = 0x80000028
+    ///   4  cmdsize    4   = 24
+    ///   8  entryoff   8   file offset from the image base
+    ///  16  stacksize  8
+    ///
+    /// Older binaries carry `LC_UNIXTHREAD` instead, which encodes the entry
+    /// in architecture-specific thread state; those are not resolved here and
+    /// produce `nil`, so the caller reports a miss rather than jumping to a
+    /// guessed address.
+    func mainEntryOffset() -> UInt64? {
+        let reader = ByteReader(data)
+        for entry in loadCommands where entry.cmd == MachOLoadCommand.main {
+            guard let entryoff = reader.u64(at: entry.range.lowerBound + 8) else { continue }
+            return entryoff
+        }
+        return nil
+    }
+
     /// The names of every segment in the arm64 slice, in load-command order.
     func segmentNames() -> [String] {
         let reader = ByteReader(data)

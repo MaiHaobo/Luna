@@ -222,17 +222,27 @@ final class PreviewLoader: GuestLoader {
 
 // MARK: - Runtime loader
 
-/// The real loader. Present as a fully-specified type so the architecture is
-/// honest about where it is going, but hard-gated on capabilities so it can
-/// never be reached in an environment where it would crash.
+/// The real loader: patches nothing itself, but performs the five-step dyld
+/// load described in `DyldImageLoader`.
 ///
-/// The remaining implementation work is documented in `docs/LOADER.md`; the
-/// capability gate below is the contract that keeps that work isolated.
+/// Gated on capabilities rather than on a flag, because the steps that retarget
+/// process identity need writable memory inside dyld's own data. Where that is
+/// unavailable the load cannot proceed at all, and the honest outcome is to say
+/// so and fall back to preview — not to attempt the load and crash inside
+/// someone else's startup code.
 @MainActor
 final class RuntimeLoader: GuestLoader {
 
     let name = "运行时加载"
     private let capabilities: LoaderCapabilities
+
+    /// Called with the guest and the load report once the image is mapped and
+    /// its entry point resolved. Mirrors `PreviewLoader.onPresent` so the
+    /// coordinator can present either backend the same way.
+    var onLoaded: ((GuestApp, DyldLoadReport) -> Void)?
+
+    /// One line per step, forwarded into the session log.
+    var onLog: ((String) -> Void)?
 
     init(capabilities: LoaderCapabilities) {
         self.capabilities = capabilities
@@ -246,15 +256,35 @@ final class RuntimeLoader: GuestLoader {
     }
 
     func launch(_ guest: GuestApp) throws {
+        guard guest.trustAcknowledged else { throw LoaderError.notAcknowledged }
+        guard !guest.hasBlockingWarning else { throw LoaderError.binaryEncrypted }
         guard isAvailable else {
             throw LoaderError.runtimeUnavailable(
                 unavailabilityReason ?? "未知原因")
         }
-        // Intentionally unreachable on stock devices — see docs/LOADER.md.
-        // The implementation binds `_NSGetExecutablePath`, retargets
-        // `NSBundle.mainBundle`, then `dlopen`s the patched image and jumps to
-        // its entry point.
-        throw LoaderError.runtimeUnavailable(
-            "运行时加载尚未在当前构建中启用。")
+
+        // The patch pass writes here; `PreviewLoader` runs it too, so by the
+        // time a guest has been launched once the artifact exists. Re-run it
+        // when missing so a runtime launch is self-contained.
+        let executable = guest.patchedExecutableURL
+        if !FileManager.default.fileExists(atPath: executable.path) {
+            try LunaPaths.bootstrap()
+            try FileManager.default.createDirectory(
+                at: guest.patchedDirectoryURL, withIntermediateDirectories: true)
+            let source = guest.bundleURL.appendingPathComponent(guest.executableName)
+            _ = try MachOPatcher.patch(
+                sourceURL: source,
+                outputURL: executable,
+                loaderPath: LunaEnvironment.effectiveLoaderPath
+            )
+        }
+
+        let report = try DyldImageLoader.load(
+            executableURL: executable,
+            bundleURL: guest.bundleURL,
+            log: { [weak self] line in self?.onLog?(line) }
+        )
+
+        onLoaded?(guest, report)
     }
 }
