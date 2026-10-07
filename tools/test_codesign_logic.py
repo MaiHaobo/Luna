@@ -428,52 +428,135 @@ def test_length_is_content_independent():
 
 
 def test_shipping_binary_if_present():
-    """If a real Mach-O is available, verify the assumptions against it."""
+    """If a real Mach-O is available, run the signer over it end to end.
+
+    The shipped IPA is deliberately *unsigned*, so this does not look for an
+    existing `LC_CODE_SIGNATURE` — it exercises the injection path instead.
+    Everything `MachOCodeSigner` does is replayed in Python: inject the command,
+    size the file, update `__LINKEDIT`, hash, then place the blob. The
+    invariants the kernel checks are then asserted on the *finished* bytes.
+    """
     import os
     candidates = [
-        "/workspace/Luna/Luna-download/Luna-1.4.0-unsigned.ipa",
-        "/workspace/Luna/Luna-download/Luna-1.3.0-unsigned.ipa",
         "/workspace/Luna-download/Luna-1.4.0-unsigned.ipa",
+        "/workspace/Luna/Luna-download/Luna-1.4.0-unsigned.ipa",
+        "/workspace/Luna-download/Luna-1.3.0-unsigned.ipa",
     ]
     ipa = next((p for p in candidates if os.path.exists(p)), None)
     if not ipa:
         print("── 真实二进制对照：跳过（未找到 IPA） ──")
         return
 
-    print("── 真实二进制对照 ──")
+    print(f"── 真实二进制对照（{os.path.basename(ipa)}） ──")
     import zipfile
     with zipfile.ZipFile(ipa) as zf:
-        exe_names = [n for n in zf.namelist()
-                     if n.startswith("Payload/")
-                     and n.count("/") == 2
-                     and not n.endswith("/")]
-        check(bool(exe_names), "IPA 中应存在主可执行文件")
-        if not exe_names:
+        # The main executable is the Payload/*.app/<name> entry without a dot
+        # in its final path component.
+        main = None
+        for name in zf.namelist():
+            if not name.startswith("Payload/") or name.endswith("/"):
+                continue
+            parts = name.split("/")
+            if len(parts) == 3 and "." not in parts[2]:
+                main = name
+                break
+        check(main is not None, "IPA 中应存在主可执行文件")
+        if main is None:
             return
-        data = zf.read(exe_names[0])
+        original = bytearray(zf.read(main))
 
-    # Parse LC_CODE_SIGNATURE (0x1D) and check dataoff/size are sane.
-    magic = struct.unpack_from("<I", data, 0)[0]
-    check(magic in (0xFEEDFACF, 0xFEEDFACE), "应为 Mach-O")
+    magic = struct.unpack_from("<I", original, 0)[0]
+    check(magic == 0xFEEDFACF, "主可执行文件应为 64 位 Mach-O")
     if magic != 0xFEEDFACF:
         return
-    ncmds, sizeofcmds = struct.unpack_from("<II", data, 16)
+
+    # ── Replay injectEmptyCodeSignatureCommand ──────────────────────────
+    ncmds, sizeofcmds = struct.unpack_from("<II", original, 16)
+    commands_end = 32 + sizeofcmds
+
+    zero_run = 0
+    while (commands_end + zero_run < len(original)
+           and original[commands_end + zero_run] == 0):
+        zero_run += 1
+    check(zero_run >= 16,
+          f"加载命令后应有 ≥16 字节零填充（实测 {zero_run}）")
+
+    aligned = (len(original) + 15) // 16 * 16
+    buf = bytearray(original) + bytes(aligned - len(original))
+    struct.pack_into("<IIII", buf, commands_end, 0x1D, 16, aligned, 0)
+    struct.pack_into("<I", buf, 16, ncmds + 1)
+    struct.pack_into("<I", buf, 20, sizeofcmds + 16)
+
+    # ── Locate __LINKEDIT in the injected image ─────────────────────────
     cursor = 32
-    found = None
-    for _ in range(ncmds):
-        cmd, cmdsize = struct.unpack_from("<II", data, cursor)
-        if cmd == 0x1D:
-            dataoff, datasize = struct.unpack_from("<II", data, cursor + 8)
-            found = (dataoff, datasize)
+    linkedit = None
+    for _ in range(ncmds + 1):
+        cmd, cmdsize = struct.unpack_from("<II", buf, cursor)
+        if (cmd == 0x19
+                and buf[cursor + 8:cursor + 24].split(b"\x00")[0] == b"__LINKEDIT"):
+            linkedit = cursor
         cursor += cmdsize
-    check(found is not None, "真实构建应带 LC_CODE_SIGNATURE")
-    if found:
-        dataoff, datasize = found
-        check(dataoff + datasize <= len(data),
-              "签名区应落在文件范围内")
-        check(dataoff % 16 == 0, "签名偏移应 16 字节对齐")
-        print(f"   真实构建：dataoff={dataoff} datasize={datasize} "
-              f"（即 codeLimit 应为 {dataoff}）")
+    check(linkedit is not None, "应能定位 __LINKEDIT 段命令")
+    if linkedit is None:
+        return
+
+    linkedit_fileoff = struct.unpack_from("<Q", buf, linkedit + 40)[0]
+    linkedit_vmsize = struct.unpack_from("<Q", buf, linkedit + 32)[0]
+
+    # ── Plan, size, hash, place ─────────────────────────────────────────
+    slots = {SLOT_INFO: sha256(b"info")}
+
+    def assemble_for(code: bytes) -> bytes:
+        return build_super_blob([
+            (SLOT_CODEDIRECTORY, build_code_directory(
+                identifier="com.maihaobo.luna", code=code,
+                code_limit=aligned, special_slots=slots)),
+            (SLOT_REQUIREMENTS,
+             generic_blob(MAGIC_REQUIREMENTS, struct.pack("<I", 0))),
+            (SLOT_SIGNATURE, generic_blob(MAGIC_BLOBWRAPPER, b"")),
+        ])
+
+    signature_size = len(assemble_for(bytes(buf)))
+    struct.pack_into("<I", buf, commands_end + 12, signature_size)
+    del buf[aligned:]
+
+    new_filesize = (len(buf) - linkedit_fileoff) + signature_size
+    new_vmsize = max(linkedit_vmsize,
+                     (new_filesize + PAGE_SIZE - 1) // PAGE_SIZE * PAGE_SIZE)
+    struct.pack_into("<Q", buf, linkedit + 48, new_filesize)
+    struct.pack_into("<Q", buf, linkedit + 32, new_vmsize)
+
+    final_cd = build_code_directory(
+        identifier="com.maihaobo.luna", code=bytes(buf[:aligned]),
+        code_limit=aligned, special_slots=slots)
+    final_sb = assemble_for(bytes(buf[:aligned]))
+    check(len(final_sb) == signature_size,
+          "真实二进制上签名长度也应与内容无关")
+    buf[aligned:aligned + len(final_sb)] = final_sb
+
+    # ── Assert the invariants on the finished file ──────────────────────
+    cd = read_cd(final_cd)
+    region = bytes(buf[:cd["code_limit"]])
+    rederived = b"".join(
+        sha256(region[i * PAGE_SIZE:(i + 1) * PAGE_SIZE]) for i in range(cd["n_code"]))
+    embedded = final_cd[cd["hash_offset"]:cd["hash_offset"] + cd["n_code"] * 32]
+    check(rederived == embedded,
+          "真实二进制：从成品重算的页哈希应与内嵌一致（写序正确）")
+    check(cd["code_limit"] == aligned,
+          "真实二进制：codeLimit 应等于签名起始偏移")
+    check(aligned % 16 == 0, "真实二进制：签名偏移应 16 字节对齐")
+    check(linkedit_fileoff + new_filesize == len(buf),
+          "真实二进制：__LINKEDIT.filesize 应恰好覆盖到文件末尾")
+    check(new_vmsize >= linkedit_vmsize,
+          "真实二进制：__LINKEDIT.vmsize 只应增长，不应缩小")
+    check(cd["flags"] & CS_ADHOC, "真实二进制：flags 应带 CS_ADHOC")
+
+    print(f"   注入命令：零填充 {zero_run} 字节；"
+          f"签名 {signature_size} 字节，覆盖 {cd['code_limit']} 字节，"
+          f"{cd['n_code']} 页")
+    print(f"   __LINKEDIT：filesize {linkedit_fileoff}+{new_filesize}="
+          f"{linkedit_fileoff + new_filesize}（文件末尾），"
+          f"vmsize {linkedit_vmsize}→{new_vmsize}")
 
 
 def test_signed_image_is_self_consistent():
