@@ -371,11 +371,7 @@ final class GuestStore: ObservableObject {
         defer { signingStage = nil }
 
         do {
-            let report = try await Self.performResignOffMainActor(
-                guest: guest,
-                progress: { [weak self] line in
-                    Task { @MainActor in self?.signingStage = line }
-                })
+            let report = try await Self.performResignOffMainActor(guest: guest)
 
             var updated = guest
             updated.state = .signed
@@ -403,16 +399,18 @@ final class GuestStore: ObservableObject {
     /// `Data`, so it is safe to hand to a detached task — but it must be
     /// `nonisolated` to be callable from one, hence the static helper rather
     /// than a method on this `@MainActor` class.
+    ///
+    /// The stage callback is deliberately *not* forwarded into this helper:
+    /// a closure that hops back to the main actor would have to cross an
+    /// isolation boundary, and the four stages are coarse enough that the
+    /// caller can narrate them itself.
     nonisolated private static func performResignOffMainActor(
-        guest: GuestApp,
-        progress: @escaping (String) -> Void
+        guest: GuestApp
     ) async throws -> ResignReport {
         try await Task.detached(priority: .userInitiated) {
             // `GuestApp` is a value type, so capturing it here copies; the
             // detached task therefore never touches main-actor state.
-            try GuestResigner.resign(
-                guest: guest,
-                progress: { line in progress(line) })
+            try GuestResigner.resign(guest: guest)
         }.value
     }
 

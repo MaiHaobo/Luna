@@ -280,6 +280,7 @@ struct GuestRow: View {
         switch guest.state {
         case .imported: return .gray
         case .ready: return .blue
+        case .signed: return .teal
         case .launching: return .orange
         case .launched: return .green
         case .failed: return .red
