@@ -314,8 +314,14 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+      # The xcarchive exists only to make a failed build easier to inspect, so
+      # it is uploaded last and must never be able to fail the job: `always()`
+      # keeps it running after a real failure, and `continue-on-error` keeps an
+      # artifact-service hiccup from turning a good build red. A build that
+      # reached this point has already published its IPA in the step above.
       - name: Upload archive for debugging
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: Luna-xcarchive
