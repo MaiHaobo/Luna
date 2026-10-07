@@ -386,7 +386,11 @@ final class GuestStore: ObservableObject {
             return true
         } catch {
             var updated = guest
-            updated.lastError = "签名失败：\(error.localizedDescription)"
+            // `error.localizedDescription` already reads as a sentence —
+            // `CodeSignError` and `MachOError` both provide 中文描述, and the
+            // signing errors say "签名失败：…" themselves. Wrapping it again
+            // produced "签名失败：签名失败：…" in the UI.
+            updated.lastError = error.localizedDescription
             update(updated)
             NSLog("[Luna] resign failed: \(error)")
             return false

@@ -194,6 +194,16 @@ final class PreviewLoader: GuestLoader {
         }
         guard !guest.hasBlockingWarning else { throw LoaderError.binaryEncrypted }
 
+        // A signed guest needs no patch pass: the resign pipeline already
+        // patched the binary and sealed the bundle, and touching it again
+        // would invalidate the signature. Preview presents that artifact as-is.
+        let signedExecutable = guest.signedExecutableURL
+        if guest.isSigned,
+           FileManager.default.fileExists(atPath: signedExecutable.path) {
+            onPresent?(guest, nil, signedExecutable)
+            return
+        }
+
         // Run the real patch pipeline so the report we show is real data.
         var report: MachOPatchReport?
         var patchedExecutable = guest.bundleURL.appendingPathComponent(guest.executableName)
@@ -263,25 +273,37 @@ final class RuntimeLoader: GuestLoader {
                 unavailabilityReason ?? "未知原因")
         }
 
-        // The patch pass writes here; `PreviewLoader` runs it too, so by the
-        // time a guest has been launched once the artifact exists. Re-run it
-        // when missing so a runtime launch is self-contained.
-        let executable = guest.patchedExecutableURL
-        if !FileManager.default.fileExists(atPath: executable.path) {
-            try LunaPaths.bootstrap()
-            try FileManager.default.createDirectory(
-                at: guest.patchedDirectoryURL, withIntermediateDirectories: true)
-            let source = guest.bundleURL.appendingPathComponent(guest.executableName)
-            _ = try MachOPatcher.patch(
-                sourceURL: source,
-                outputURL: executable,
-                loaderPath: LunaEnvironment.effectiveLoaderPath
-            )
+        // Prefer the signed artifact when one exists. The resign pass already
+        // patched the binary and sealed the whole bundle — patching again
+        // would change bytes the signature covers, unsealing it. Only guests
+        // that have never been signed take the patch-here path.
+        let executable: URL
+        let bundleForLoad: URL
+        let signedExecutable = guest.signedExecutableURL
+        if guest.isSigned,
+           FileManager.default.fileExists(atPath: signedExecutable.path) {
+            executable = signedExecutable
+            bundleForLoad = guest.signedBundleURL
+        } else {
+            let fallback = guest.patchedExecutableURL
+            if !FileManager.default.fileExists(atPath: fallback.path) {
+                try LunaPaths.bootstrap()
+                try FileManager.default.createDirectory(
+                    at: guest.patchedDirectoryURL, withIntermediateDirectories: true)
+                let source = guest.bundleURL.appendingPathComponent(guest.executableName)
+                _ = try MachOPatcher.patch(
+                    sourceURL: source,
+                    outputURL: fallback,
+                    loaderPath: LunaEnvironment.effectiveLoaderPath
+                )
+            }
+            executable = fallback
+            bundleForLoad = guest.bundleURL
         }
 
         let report = try DyldImageLoader.load(
             executableURL: executable,
-            bundleURL: guest.bundleURL,
+            bundleURL: bundleForLoad,
             log: { [weak self] line in self?.onLog?(line) }
         )
 

@@ -186,6 +186,13 @@ struct GuestApp: Identifiable, Codable, Hashable {
     var signedBundleURL: URL {
         patchedDirectoryURL.appendingPathComponent(bundleFolderName, isDirectory: true)
     }
+
+    /// `Patched/<uuid>/<Name>.app/<exe>` — the patched *and* signed main
+    /// executable. Callers must check existence: this URL is derived, and a
+    /// guest that has never been signed has no file behind it.
+    var signedExecutableURL: URL {
+        signedBundleURL.appendingPathComponent(executableName)
+    }
 }
 
 // MARK: - Filesystem layout

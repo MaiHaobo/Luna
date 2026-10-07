@@ -81,14 +81,24 @@ enum GuestResigner {
         if fm.fileExists(atPath: signedRoot.path) {
             try fm.removeItem(at: signedRoot)
         }
-        try fm.createDirectory(
-            at: signedRoot.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: signedRoot, withIntermediateDirectories: true)
 
-        progress?("复制 bundle…")
-        try fm.copyItem(at: guest.bundleURL, to: signedRoot)
-
+        // Copy *into* the staged root, so the result matches
+        // `GuestApp.signedBundleURL`: `Patched/<uuid>/<Name>.app`.
+        //
+        // `copyItem` makes the destination the copy itself, not a container to
+        // copy into — aiming it at `signedRoot` would leave the app's own
+        // contents (Info.plist, the executable, Frameworks/) directly inside
+        // `<uuid>/`, and the staged bundle would then be looked up one level
+        // too deep. That was a real bug: the copy succeeded, and the guard
+        // below failed with "复制后的 bundle 不存在" for any guest whose bundle
+        // was staged under a fresh UUID directory.
         let stagedBundle = signedRoot
             .appendingPathComponent(guest.bundleFolderName, isDirectory: true)
+
+        progress?("复制 bundle…")
+        try fm.copyItem(at: guest.bundleURL, to: stagedBundle)
+
         guard fm.fileExists(atPath: stagedBundle.path) else {
             throw CodeSignError.signingFailed(
                 "复制后的 bundle 不存在：\(stagedBundle.lastPathComponent)")
