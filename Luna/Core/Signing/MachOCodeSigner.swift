@@ -44,6 +44,9 @@ struct MachOSignReport {
     var previousSignatureSize: Int
     /// Whether the file had to grow.
     var didGrow: Bool
+    /// Whether an `LC_CODE_SIGNATURE` command had to be added — true for a
+    /// binary that was never signed before.
+    var didInjectCommand: Bool
     /// First 20 bytes of the CodeDirectory's SHA-256 — the `cdhash`.
     var cdhash: [UInt8]
 
@@ -52,6 +55,9 @@ struct MachOSignReport {
     var humanReadable: String {
         var lines: [String] = []
         lines.append("签名覆盖：\(codeLimit) 字节")
+        if didInjectCommand {
+            lines.append("已注入 LC_CODE_SIGNATURE 命令（原二进制未签名）")
+        }
         lines.append("签名大小：\(signatureSize) 字节（原 \(previousSignatureSize) 字节）")
         lines.append(didGrow ? "签名区已扩展（文件增长）" : "签名区已原地覆写")
         lines.append("cdhash：\(cdhashHex)")
@@ -101,13 +107,26 @@ enum MachOCodeSigner {
 
         guard !identifier.isEmpty else { throw CodeSignError.identifierMissing }
 
-        // ── Locate LC_CODE_SIGNATURE ────────────────────────────────────────
-        guard let command = image.codeSignatureCommand() else {
-            throw CodeSignError.noCodeSignatureLoadCommand
-        }
-
-        let previousSize = Int(command.dataSize)
         var buffer = image.data
+
+        // ── Locate or create LC_CODE_SIGNATURE ──────────────────────────────
+        // A binary that was never signed — a self-built app, a stripped dump —
+        // has no such command at all. Rather than refuse it, we place an
+        // empty one in the load-command padding and treat the region after
+        // the current load commands as the signing area. `MachOPatcher` uses
+        // the same trick for its dylib injection, so the code is proven.
+        let command: MachOImage.CodeSignatureCommand
+        var previousSize = 0
+        var didInjectCommand = false
+
+        if let existing = image.codeSignatureCommand() {
+            command = existing
+            previousSize = Int(existing.dataSize)
+        } else {
+            let placement = try injectEmptyCodeSignatureCommand(into: &buffer, image: image)
+            command = placement.command
+            didInjectCommand = true
+        }
 
         // ── Decide where the signature will live ────────────────────────────
         // `codeLimit` is the offset the signature starts at; everything before
@@ -119,11 +138,22 @@ enum MachOCodeSigner {
                 "LC_CODE_SIGNATURE 的文件偏移 \(signatureOffset) 超出文件长度 \(buffer.count)")
         }
 
-        // ── Build the member blobs ──────────────────────────────────────────
-        // Order matters: the CodeDirectory hashes every special slot, so all
-        // of them must exist before it is built. Neither the entitlements plist
-        // nor the (empty) signature wrapper depends on the CodeDirectory, so
-        // everything can be produced in one pass.
+        // ── Plan the signature ──────────────────────────────────────────────
+        // A CodeDirectory's length depends only on its *shape* — the page
+        // count, the special-slot count, and the identifier's length — never
+        // on the hash values themselves. So the SuperBlob's final size is
+        // known before its contents are final, which is what lets this run in
+        // a clean three-step order:
+        //
+        //   1. build once, to learn the size
+        //   2. write every field that lives before the signature region
+        //   3. rebuild over the final bytes, and place the blob
+        //
+        // Step 2 has to come before step 3 because the CodeDirectory hashes
+        // `[0, codeLimit)` — a region that includes the `LC_CODE_SIGNATURE`
+        // command (and its `dataSize` field) and every segment header. Writing
+        // those after hashing produces a signature describing a file that no
+        // longer exists, which verifies as invalid with no obvious cause.
         //
         // Info.plist and the resource directory (CodeResources) are hashed by
         // the *bundle* signer, which is the only layer that knows their bytes;
@@ -145,80 +175,187 @@ enum MachOCodeSigner {
         // kernel consults for JIT and library-validation decisions.
         let text = image.segment(named: "__TEXT")
 
-        let input = CodeDirectoryInput(
-            identifier: identifier,
-            teamID: teamID,
-            code: buffer,
-            codeLimit: UInt32(signatureOffset),
-            specialSlots: specialSlots,
-            specialSlotCount: specialSlotCount,
-            execSegBase: text?.vmAddress ?? 0,
-            execSegLimit: text?.vmSize ?? 0,
-            execSegFlags: image.fileType == MachOFileType.execute
-                ? CodeSignExecSeg.mainBinary
-                : 0,
-            flags: CodeSignFlag.adhoc,
-            pageSize: CodeDirectoryBuilder.pageSizeExponent
-        )
+        /// The parts of a CodeDirectory that do not depend on the file bytes.
+        func makeInput(code: Data) -> CodeDirectoryInput {
+            CodeDirectoryInput(
+                identifier: identifier,
+                teamID: teamID,
+                code: code,
+                codeLimit: UInt32(signatureOffset),
+                specialSlots: specialSlots,
+                specialSlotCount: specialSlotCount,
+                execSegBase: text?.vmAddress ?? 0,
+                execSegLimit: text?.vmSize ?? 0,
+                execSegFlags: image.fileType == MachOFileType.execute
+                    ? CodeSignExecSeg.mainBinary
+                    : 0,
+                flags: CodeSignFlag.adhoc,
+                pageSize: CodeDirectoryBuilder.pageSizeExponent)
+        }
 
-        let codeDirectory = try CodeDirectoryBuilder.build(input)
-
-        var members: [SuperBlobMember] = [
-            SuperBlobMember(slot: CodeSignSlot.codeDirectory, blob: codeDirectory),
-            SuperBlobMember(slot: CodeSignSlot.requirements,
-                            blob: SuperBlobBuilder.emptyRequirements()),
-        ]
-        if let entitlementsBlob {
+        func assemble(codeDirectory: Data) -> Data {
+            var members: [SuperBlobMember] = [
+                SuperBlobMember(slot: CodeSignSlot.codeDirectory, blob: codeDirectory),
+                SuperBlobMember(slot: CodeSignSlot.requirements,
+                                blob: SuperBlobBuilder.emptyRequirements()),
+            ]
+            if let entitlementsBlob {
+                members.append(SuperBlobMember(
+                    slot: CodeSignSlot.entitlements, blob: entitlementsBlob))
+            }
             members.append(SuperBlobMember(
-                slot: CodeSignSlot.entitlements, blob: entitlementsBlob))
-        }
-        members.append(SuperBlobMember(
-            slot: CodeSignSlot.signature, blob: signatureWrapper))
-
-        let superBlob = SuperBlobBuilder.build(members: members)
-
-        // ── Place the blob ──────────────────────────────────────────────────
-        let available = buffer.count - signatureOffset
-        let didGrow = superBlob.count > available
-
-        if didGrow {
-            // Trim anything after the old signature (there should be nothing,
-            // but a padded or appended file could carry trailing bytes).
-            buffer = buffer.subdata(in: 0..<signatureOffset)
-            buffer.append(superBlob)
-        } else {
-            buffer.replaceSubrange(
-                signatureOffset..<(signatureOffset + superBlob.count),
-                with: superBlob)
+                slot: CodeSignSlot.signature, blob: signatureWrapper))
+            return SuperBlobBuilder.build(members: members)
         }
 
-        // ── Update the load command ─────────────────────────────────────────
-        writeUInt32LE(UInt32(superBlob.count),
+        // Step 1: build once purely to learn the final length.
+        let plannedSuperBlob = assemble(
+            codeDirectory: try CodeDirectoryBuilder.build(makeInput(code: buffer)))
+        let signatureSize = plannedSuperBlob.count
+
+        // Step 2: write everything that lands before the signature region.
+        //
+        // Order matters and is subtle: the CodeDirectory hashes `[0, codeLimit)`
+        // and *every* field written below lives inside that range —
+        // `LC_CODE_SIGNATURE.dataSize` is a load command, and `__LINKEDIT`'s
+        // `filesize`/`vmsize` are load-command payloads. All of them must be
+        // final *before* step 3 hashes. Writing any of them afterwards produces
+        // a signature describing a file that no longer exists on disk: it
+        // verifies as invalid with no obvious cause.
+
+        // 2a. `LC_CODE_SIGNATURE.dataSize`
+        writeUInt32LE(UInt32(signatureSize),
                       into: &buffer, at: command.commandOffset + dataSizeFieldOffset)
 
-        // ── Update __LINKEDIT ───────────────────────────────────────────────
-        if didGrow, let linkeditOffset = image.segmentCommandOffset(named: "__LINKEDIT") {
-            // filesize covers the signature; vmsize must stay page-aligned and
-            // large enough to map it.
-            let linkeditFileOff = image.segment(named: "__LINKEDIT")?.fileOffset ?? 0
-            let newFileSize = UInt64(buffer.count) - linkeditFileOff
-            let newVMSize = align(newFileSize, to: UInt64(CodeDirectoryBuilder.pageSize))
-            writeUInt64LE(newFileSize, into: &buffer, at: linkeditOffset + 48)
-            writeUInt64LE(newVMSize, into: &buffer, at: linkeditOffset + 32)
+        // 2b. Size the file so the signature region ends exactly where the blob
+        //     wants it. The bytes after `signatureOffset` are the *old*
+        //     signature — never covered by the hash — so they can be dropped
+        //     freely, whether they are too few (grow) or too many (shrink).
+        let available = buffer.count - signatureOffset
+        let didGrow = signatureSize > available
+        let didShrink = signatureSize < available
+
+        if didGrow || didShrink {
+            buffer = buffer.subdata(in: 0..<signatureOffset)
+            buffer.append(plannedSuperBlob)
         }
+
+        // 2c. `__LINKEDIT` must cover the final signature region.
+        //
+        // `segment_command_64` layout:
+        //   32  vmsize
+        //   48  filesize
+        //
+        // This deliberately runs for every case — not just growth — because the
+        // fields are inside `[0, codeLimit)` and therefore hashed. Writing them
+        // after step 3 would silently invalidate the signature.
+        if let linkedit = image.segment(named: "__LINKEDIT") {
+            let newFileSize = UInt64(buffer.count) - linkedit.fileOffset
+            // `vmsize` only ever grows: shrinking a virtual size would ask the
+            // kernel to unmap pages that are still present in the file.
+            let newVMSize = max(
+                linkedit.vmSize,
+                align(newFileSize, to: UInt64(CodeDirectoryBuilder.pageSize)))
+            writeUInt64LE(newFileSize, into: &buffer, at: linkedit.commandOffset + 48)
+            writeUInt64LE(newVMSize, into: &buffer, at: linkedit.commandOffset + 32)
+        }
+
+        // Step 3: recompute over the final bytes and place the blob.
+        let finalCodeDirectory = try CodeDirectoryBuilder.build(makeInput(code: buffer))
+        let finalSuperBlob = assemble(codeDirectory: finalCodeDirectory)
+        assert(finalSuperBlob.count == signatureSize,
+               "CodeDirectory length must not depend on its contents")
+
+        // The blob lands at `[signatureOffset, signatureOffset + size)`. Its own
+        // bytes are never hashed — they start exactly at `codeLimit` — so writing
+        // it last cannot invalidate what step 3 just computed.
+        buffer.replaceSubrange(
+            signatureOffset..<(signatureOffset + finalSuperBlob.count),
+            with: finalSuperBlob)
 
         let report = MachOSignReport(
             codeLimit: UInt32(signatureOffset),
-            signatureSize: superBlob.count,
+            signatureSize: finalSuperBlob.count,
             previousSignatureSize: previousSize,
             didGrow: didGrow,
-            cdhash: CodeDirectoryBuilder.cdhash(of: codeDirectory)
+            didInjectCommand: didInjectCommand,
+            cdhash: CodeDirectoryBuilder.cdhash(of: finalCodeDirectory)
         )
 
         return (buffer, report)
     }
 
     // MARK: - Helpers
+
+    /// Injects an empty `LC_CODE_SIGNATURE` and reports where the signature
+    /// should go.
+    ///
+    /// Used for binaries that were never signed. The command is written into
+    /// the zero padding that follows the last load command, and the signature
+    /// region is defined as "everything from the current end of the file
+    /// onward", 16-byte aligned.
+    ///
+    /// This mirrors `MachOPatcher.injectLoadDylib`, including the check that
+    /// the padding is genuinely zeroed — a malformed binary should fail loudly
+    /// rather than have its first section overwritten.
+    private static func injectEmptyCodeSignatureCommand(
+        into buffer: inout Data,
+        image: MachOImage
+    ) throws -> (command: MachOImage.CodeSignatureCommand, commandOffset: Int) {
+
+        let headerSize = 32 // sizeof(mach_header_64)
+        let commandSize = linkeditDataCommandSize
+
+        // Region the loader believes is occupied by load commands.
+        let commandsEnd = image.sliceOffset + headerSize + Int(image.sizeofcmds)
+
+        let maxLookahead = 64 * 1024
+        let searchLimit = min(buffer.count, commandsEnd + maxLookahead)
+        var available = 0
+        while commandsEnd + available < searchLimit,
+              buffer[buffer.startIndex + commandsEnd + available] == 0 {
+            available += 1
+        }
+        guard available >= commandSize else {
+            throw CodeSignError.cannotExpandSignatureRegion(
+                needed: commandSize, available: available)
+        }
+
+        // The signature starts at the end of the file, aligned up to 16 bytes.
+        // Everything between the current end and that boundary is zero padding
+        // that we own, so the alignment never touches real data.
+        let currentEnd = buffer.count
+        let alignedStart = (currentEnd + signatureAlignment - 1)
+            / signatureAlignment * signatureAlignment
+        if alignedStart > currentEnd {
+            buffer.append(contentsOf: [UInt8](repeating: 0, count: alignedStart - currentEnd))
+        }
+
+        // ── Write the command ───────────────────────────────────────────────
+        //   0  cmd        4   = LC_CODE_SIGNATURE
+        //   4  cmdsize    4   = 16
+        //   8  dataoff    4   file offset of the signature
+        //  12  datasize   4   0 (nothing written yet)
+        var command = Data()
+        command.appendLE32(MachOLoadCommand.codeSignature)
+        command.appendLE32(UInt32(commandSize))
+        command.appendLE32(UInt32(alignedStart))
+        command.appendLE32(0)
+
+        buffer.replaceSubrange(commandsEnd..<(commandsEnd + commandSize), with: command)
+
+        // Bump ncmds (+1) and sizeofcmds (+16) in the header.
+        writeUInt32LE(image.ncmds + 1, into: &buffer, at: image.sliceOffset + 16)
+        writeUInt32LE(
+            image.sizeofcmds + UInt32(commandSize),
+            into: &buffer, at: image.sliceOffset + 20)
+
+        let injected = MachOImage.CodeSignatureCommand(
+            commandOffset: commandsEnd,
+            dataOff: UInt32(alignedStart),
+            dataSize: 0)
+        return (injected, commandsEnd)
+    }
 
     private static func align(_ value: UInt64, to alignment: UInt64) -> UInt64 {
         let remainder = value % alignment
@@ -239,5 +376,12 @@ enum MachOCodeSigner {
         Swift.withUnsafeBytes(of: &le) { raw in
             data.replaceSubrange(offset..<(offset + 8), with: raw)
         }
+    }
+}
+
+private extension Data {
+    mutating func appendLE32(_ value: UInt32) {
+        var le = value.littleEndian
+        Swift.withUnsafeBytes(of: &le) { append(contentsOf: $0) }
     }
 }

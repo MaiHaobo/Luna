@@ -363,6 +363,70 @@ def test_requirements_and_wrappers():
           "签名包装 magic 应为 CSMAGIC_BLOBWRAPPER")
 
 
+def test_length_is_content_independent():
+    """The invariant that makes single-pass signing possible.
+
+    A CodeDirectory's length must depend only on its shape — page count,
+    special-slot count, identifier length — and never on the hash values. If
+    that ever stops being true, MachOCodeSigner's three-step order breaks:
+    it writes `dataSize` before knowing the hashes.
+    """
+    print("── 长度与内容无关（单遍签名的前提） ──")
+
+    def length_of(code_bytes, slots):
+        return len(build_code_directory(
+            identifier="com.example.demo",
+            code=code_bytes,
+            code_limit=len(code_bytes),
+            special_slots=slots,
+        ))
+
+    slots = {
+        SLOT_INFO: sha256(b"info"),
+        SLOT_ENTITLEMENTS: sha256(b"ent"),
+        SLOT_DER_ENTITLEMENTS: sha256(b"der"),
+    }
+
+    # Same shape, wildly different contents.
+    a = length_of(bytes(40960), slots)
+    b = length_of(bytes((i * 13 + 5) & 0xFF for i in range(40960)), slots)
+    check(a == b, "形状相同、内容不同时，CodeDirectory 长度应一致")
+
+    # Same shape, different slot *values* (not slot set).
+    slots2 = dict(slots)
+    slots2[SLOT_INFO] = sha256(b"a completely different Info.plist blob")
+    c = length_of(bytes(40960), slots2)
+    check(a == c, "槽值不同但槽位集合相同时，长度应一致")
+
+    # Extra page changes the length.
+    d = length_of(bytes(81920), slots)
+    check(d > a, "多一页应使 CodeDirectory 变长")
+
+    # Identifier length feeds into the length.
+    e = len(build_code_directory(
+        identifier="a.much.longer.bundle.identifier.here",
+        code=bytes(40960), code_limit=40960, special_slots=slots))
+    check(e > a, "更长的标识符应使 CodeDirectory 变长")
+
+    # And the SuperBlob length follows the same rule.
+    sb_a = build_super_blob([
+        (SLOT_CODEDIRECTORY, build_code_directory(
+            identifier="com.example.demo", code=bytes(40960),
+            code_limit=40960, special_slots=slots)),
+        (SLOT_REQUIREMENTS, generic_blob(MAGIC_REQUIREMENTS, struct.pack("<I", 0))),
+        (SLOT_SIGNATURE, generic_blob(MAGIC_BLOBWRAPPER, b"")),
+    ])
+    sb_b = build_super_blob([
+        (SLOT_CODEDIRECTORY, build_code_directory(
+            identifier="com.example.demo",
+            code=bytes((i * 13 + 5) & 0xFF for i in range(40960)),
+            code_limit=40960, special_slots=slots)),
+        (SLOT_REQUIREMENTS, generic_blob(MAGIC_REQUIREMENTS, struct.pack("<I", 0))),
+        (SLOT_SIGNATURE, generic_blob(MAGIC_BLOBWRAPPER, b"")),
+    ])
+    check(len(sb_a) == len(sb_b), "SuperBlob 长度也应只取决于形状")
+
+
 def test_shipping_binary_if_present():
     """If a real Mach-O is available, verify the assumptions against it."""
     import os
@@ -415,6 +479,7 @@ def test_shipping_binary_if_present():
 def main():
     test_code_directory_layout()
     test_code_limit_equals_signature_offset()
+    test_length_is_content_independent()
     test_super_blob()
     test_requirements_and_wrappers()
     test_shipping_binary_if_present()
