@@ -56,8 +56,13 @@ struct AppLibraryView: View {
                 switch result {
                 case .success(let urls):
                     guard let url = urls.first else { return }
-                    if !await store.importIPA(from: url) {
-                        alertMessage = "已有导入正在进行，请稍候再试。"
+                    // The fileImporter callback is synchronous, so the
+                    // await has to live inside a Task. `@MainActor in`
+                    // keeps the alert update on the main context.
+                    Task { @MainActor in
+                        if !(await store.importIPA(from: url)) {
+                            alertMessage = "已有导入正在进行，请稍候再试。"
+                        }
                     }
                 case .failure(let error):
                     alertMessage = error.localizedDescription
