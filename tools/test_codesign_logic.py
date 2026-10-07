@@ -431,7 +431,9 @@ def test_shipping_binary_if_present():
     """If a real Mach-O is available, verify the assumptions against it."""
     import os
     candidates = [
+        "/workspace/Luna/Luna-download/Luna-1.4.0-unsigned.ipa",
         "/workspace/Luna/Luna-download/Luna-1.3.0-unsigned.ipa",
+        "/workspace/Luna-download/Luna-1.4.0-unsigned.ipa",
     ]
     ipa = next((p for p in candidates if os.path.exists(p)), None)
     if not ipa:
@@ -474,6 +476,137 @@ def test_shipping_binary_if_present():
               f"（即 codeLimit 应为 {dataoff}）")
 
 
+def test_signed_image_is_self_consistent():
+    """End-to-end: the order of writes must not invalidate the signature.
+
+    This reproduces `MachOCodeSigner.sign` step for step on a synthetic Mach-O
+    that carries a real `LC_SEGMENT_64 __LINKEDIT`, and then re-derives the
+    CodeDirectory hashes from the *finished* file. If any field that lives
+    inside `[0, codeLimit)` — `LC_CODE_SIGNATURE.dataSize`, or `__LINKEDIT`'s
+    `filesize`/`vmsize` — were written after the hash step, the re-derived
+    hashes would disagree with the embedded ones.
+
+    That is precisely the bug this test exists to catch, so it writes those
+    fields *both* ways and asserts only one arrangement verifies.
+    """
+    print("── 端到端：签名自洽性（写序约束） ──")
+
+    PAGE = PAGE_SIZE
+    LINKEDIT_FILEOFF = 0x4000
+    IMAGE_SIZE = LINKEDIT_FILEOFF + 0x400          # 16 KiB + 1 KiB
+    OLD_SIG_OFFSET = IMAGE_SIZE                     # signature starts at EOF
+    OLD_SIG_SIZE = 0                                # never signed before
+
+    # 16-byte-aligned signature start, as the signer computes.
+    aligned = (IMAGE_SIZE + 15) // 16 * 16
+    padding = aligned - IMAGE_SIZE
+    image_size_aligned = aligned
+
+    def build_image(linkedit_filesize, linkedit_vmsize, data_size, payload):
+        """Synthetic image: header + LC_SEGMENT_64(__LINKEDIT) + data."""
+        # Allocate the whole image up front so the fixed-offset writes below
+        # are always in range; `payload` then overwrites the head.
+        data = bytearray(max(IMAGE_SIZE, len(payload)))
+        data[:len(payload)] = payload
+        # mach_header_64
+        struct.pack_into("<I", data, 0, 0xFEEDFACF)     # magic
+        struct.pack_into("<I", data, 12, 0x2)           # filetype MH_EXECUTE
+        struct.pack_into("<I", data, 16, 2)             # ncmds
+        struct.pack_into("<I", data, 20, 72 + 16)       # sizeofcmds
+        # LC_SEGMENT_64 __LINKEDIT at 32
+        base = 32
+        struct.pack_into("<II", data, base, 0x19, 72)
+        data[base + 8:base + 24] = b"__LINKEDIT".ljust(16, b"\x00")
+        struct.pack_into("<Q", data, base + 24, 0x100000000)   # vmaddr
+        struct.pack_into("<Q", data, base + 32, linkedit_vmsize)
+        struct.pack_into("<Q", data, base + 40, LINKEDIT_FILEOFF)
+        struct.pack_into("<Q", data, base + 48, linkedit_filesize)
+        # LC_CODE_SIGNATURE at 32 + 72
+        cbase = base + 72
+        struct.pack_into("<IIII", data, cbase, 0x1D, 16, aligned, data_size)
+        return data
+
+    def sign(update_linkedit_before_hash: bool):
+        """Runs the three-step flow, optionally with the buggy ordering."""
+        planned_cd = build_code_directory(
+            identifier="com.example.guest",
+            code=bytes(image_size_aligned), code_limit=aligned,
+            special_slots={SLOT_INFO: sha256(b"info")})
+        planned_sb = build_super_blob([
+            (SLOT_CODEDIRECTORY, planned_cd),
+            (SLOT_REQUIREMENTS, generic_blob(MAGIC_REQUIREMENTS,
+                                             struct.pack("<I", 0))),
+            (SLOT_SIGNATURE, generic_blob(MAGIC_BLOBWRAPPER, b"")),
+        ])
+        signature_size = len(planned_sb)
+
+        # Start from a finished, unsigned image.
+        buf = bytearray(build_image(0x400, 0x400, 0, b"") + bytes(padding))
+
+        # 2a. dataSize
+        struct.pack_into("<I", buf, 32 + 72 + 12, signature_size)
+
+        # 2b. the region after `aligned` is the old signature — drop it.
+        del buf[aligned:]
+
+        # 2c. __LINKEDIT
+        if update_linkedit_before_hash:
+            new_filesize = len(buf) - LINKEDIT_FILEOFF
+            struct.pack_into("<Q", buf, 32 + 48, new_filesize)
+            struct.pack_into("<Q", buf, 32 + 32, new_filesize)
+
+        # Step 3: hash, then place the blob.
+        final_cd = build_code_directory(
+            identifier="com.example.guest",
+            code=bytes(buf[:aligned]), code_limit=aligned,
+            special_slots={SLOT_INFO: sha256(b"info")})
+        final_sb = build_super_blob([
+            (SLOT_CODEDIRECTORY, final_cd),
+            (SLOT_REQUIREMENTS, generic_blob(MAGIC_REQUIREMENTS,
+                                             struct.pack("<I", 0))),
+            (SLOT_SIGNATURE, generic_blob(MAGIC_BLOBWRAPPER, b"")),
+        ])
+        buf[aligned:aligned + len(final_sb)] = final_sb
+
+        if not update_linkedit_before_hash:
+            new_filesize = len(buf) - LINKEDIT_FILEOFF
+            struct.pack_into("<Q", buf, 32 + 48, new_filesize)
+            struct.pack_into("<Q", buf, 32 + 32, new_filesize)
+
+        return bytes(buf), final_cd
+
+    # ── The correct order: verify by re-deriving from the finished file ──
+    signed, embedded_cd = sign(update_linkedit_before_hash=True)
+    cd = read_cd(embedded_cd)
+
+    page_count = cd["n_code"]
+    check(page_count == (aligned + PAGE - 1) // PAGE,
+          "页数应覆盖 [0, codeLimit)")
+    region = signed[:cd["code_limit"]]
+    rederived = b"".join(
+        sha256(region[i * PAGE:(i + 1) * PAGE]) for i in range(page_count))
+    embedded_slots = embedded_cd[cd["hash_offset"]:cd["hash_offset"] + page_count * 32]
+    check(rederived == embedded_slots,
+          "✅ 正确写序：从成品文件重算的页哈希应与内嵌一致")
+    check(read_cd(embedded_cd)["code_limit"] == aligned,
+          "codeLimit 应等于签名起始偏移")
+
+    # The signature's own bytes must lie entirely at/after codeLimit.
+    sig_start = aligned
+    check(sig_start >= cd["code_limit"],
+          "签名区必须完全落在 codeLimit 之后（否则无法自洽）")
+
+    # ── The buggy order: must NOT verify ──
+    buggy, buggy_cd = sign(update_linkedit_before_hash=False)
+    bcd = read_cd(buggy_cd)
+    bregion = buggy[:bcd["code_limit"]]
+    brederived = b"".join(
+        sha256(bregion[i * PAGE:(i + 1) * PAGE]) for i in range(bcd["n_code"]))
+    bembedded = buggy_cd[bcd["hash_offset"]:bcd["hash_offset"] + bcd["n_code"] * 32]
+    check(brederived != bembedded,
+          "❌ 错误写序（哈希后再改 __LINKEDIT）应导致校验失败——本测试即守卫此点")
+
+
 # ── Run ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -482,6 +615,7 @@ def main():
     test_length_is_content_independent()
     test_super_blob()
     test_requirements_and_wrappers()
+    test_signed_image_is_self_consistent()
     test_shipping_binary_if_present()
 
     print()
