@@ -224,7 +224,6 @@
 				isa = PBXGroup;
 				children = (
 				BC91A772C71AE0BEA1F5E8D3 /* AppLibraryView.swift */,
-				86A8A5F24E8E94350A3D64F0 /* CertificateListView.swift */,
 				32574C87249E03A46EDF3FC9 /* GuestDetailView.swift */,
 				);
 				path = AppLibrary;
@@ -244,6 +243,7 @@
 		614BC78D540873157CDCAC00 /* Import */ = {
 			isa = PBXGroup;
 			children = (
+				86A8A5F24E8E94350A3D64F0 /* CertificateListView.swift */,
 			);
 			path = Import;
 			sourceTree = "<group>";

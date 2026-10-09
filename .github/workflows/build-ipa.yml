@@ -89,6 +89,18 @@ jobs:
           # checks that every fileRef / buildPhase reference resolves.
           python3 tools/pbxproj_check.py
 
+      - name: Verify pbxproj paths match the disk
+        run: |
+          set -euo pipefail
+          # pbxproj_check.py proves every reference *resolves as an object*; it
+          # says nothing about whether the resulting path lands on a file. Since
+          # a PBXFileReference `path` is relative to its enclosing group, filing
+          # a file under the wrong group yields a path that never existed — and
+          # Xcode only notices at link time ("Build input file cannot be found"),
+          # costing a full CI cycle. Walk the group tree and assert every file
+          # reference exists on disk.
+          python3 tools/pbxproj_paths.py
+
       - name: Mach-O algorithm tests
         run: |
           set -euo pipefail
