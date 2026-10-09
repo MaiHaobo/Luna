@@ -30,6 +30,17 @@
 //  depth-first: `Frameworks/*.framework` and `PlugIns/*.appex` first, then the
 //  main executable, then the top-level `_CodeSignature`.
 //
+//  CREDENTIALS AND NESTED CODE
+//  ---------------------------
+//  When a certificate is in play, every code object in the bundle is signed
+//  with the *same* key — there is no alternative, since the profile grants one
+//  identity. What differs is the entitlements: only the outermost bundle gets
+//  them. An `application-identifier` naming the host app, embedded in a
+//  framework inside it, is a contradiction iOS resolves by rejecting the
+//  bundle; and a framework has no business claiming an application identifier
+//  at all. So `entitlementsXML` is passed down only to the main binary and
+//  withheld from every nested call.
+//
 //  THE TEMPORARY EXECUTABLE TRICK
 //  ------------------------------
 //  LiveContainer's JIT-less mode does something subtle and clever, and we copy
@@ -38,9 +49,9 @@
 //  `CFBundleExecutable` at a copy of the host's own binary, signs that, then
 //  restores the original `Info.plist`. The guest's real executable keeps a
 //  valid signature; the guest never has to be granted entitlements it did not
-//  ask for. This stage does not need the trick — ad-hoc signatures claim no
-//  entitlements — but the hook is kept so the certificate stage can use it
-//  without restructuring.
+//  ask for. This stage does not need the trick — a bundle signed under the
+//  user's own profile carries the profile's entitlements — but the hook is
+//  kept so that mode can be added without restructuring.
 //
 
 import Foundation
@@ -102,12 +113,19 @@ enum BundleSigner {
     ///   - bundleURL: the `.app` directory.
     ///   - executableName: `CFBundleExecutable`; the main binary's file name.
     ///   - identifier: identifier for the main binary's CodeDirectory.
+    ///   - credential: the certificate to sign with, or `nil` for ad-hoc.
     ///   - entitlementsXML: entitlements to embed, or `nil`.
+    ///   - embeddedProfile: the `.mobileprovision` bytes to write as
+    ///     `embedded.mobileprovision`, or `nil`. Only the outermost bundle
+    ///     gets one; a framework inside is not installed separately and does
+    ///     not carry a profile.
     static func sign(
         bundleURL: URL,
         executableName: String,
         identifier: String,
-        entitlementsXML: Data? = nil
+        credential: SigningCredential? = nil,
+        entitlementsXML: Data? = nil,
+        embeddedProfile: Data? = nil
     ) throws -> BundleSignReport {
 
         let fm = FileManager.default
@@ -138,7 +156,8 @@ enum BundleSigner {
                         "\(directory)/\(child.lastPathComponent)（非嵌套 bundle）")
                     continue
                 }
-                // Each nested bundle signs with its own Info.plist identity.
+                // Each nested bundle signs with its own Info.plist identity —
+                // and, deliberately, with no entitlements. See the header.
                 let nestedName = try nestedExecutableName(of: child) ?? child
                     .lastPathComponent
                 let nestedID = try bundleIdentifier(of: child)
@@ -147,6 +166,7 @@ enum BundleSigner {
                     bundleURL: child,
                     executableName: nestedName,
                     identifier: nestedID,
+                    credential: credential,
                     entitlementsXML: nil)
                 report.nestedBundles.append(child.lastPathComponent)
                 report.signedBinaries.append(contentsOf: nested.signedBinaries)
@@ -154,7 +174,8 @@ enum BundleSigner {
             // Bare dylibs in Frameworks/ are code objects with no bundle.
             for child in children where child.pathExtension == "dylib" {
                 try signStandaloneMachO(
-                    at: child, identifier: identifier, entitlementsXML: nil)
+                    at: child, identifier: identifier,
+                    credential: credential, entitlementsXML: nil)
                 report.signedBinaries.append(
                     "\(directory)/\(child.lastPathComponent)")
             }
@@ -186,10 +207,24 @@ enum BundleSigner {
         try signMachO(
             at: executableURL,
             identifier: identifier,
+            credential: credential,
             entitlementsXML: entitlementsXML,
             infoPlist: infoPlistData,
             codeResources: seal.data)
         report.signedBinaries.append(executableName)
+
+        // ── 4. The profile ──────────────────────────────────────────────────
+        // Written last so it is present when `CodeResources` was computed…
+        // except it is *excluded* from the seal by `excludedFromSeal`, which
+        // means its contents never enter the resource map and its timing is
+        // therefore not load bearing. It is done here, at the end, because
+        // this is the only point at which the whole bundle is otherwise final
+        // and a partially written profile would be the only inconsistency.
+        if let profileData = embeddedProfile {
+            let destination = bundleURL
+                .appendingPathComponent("embedded.mobileprovision")
+            try profileData.write(to: destination, options: .atomic)
+        }
 
         return report
     }
@@ -200,6 +235,7 @@ enum BundleSigner {
     private static func signMachO(
         at url: URL,
         identifier: String,
+        credential: SigningCredential?,
         entitlementsXML: Data?,
         infoPlist: Data,
         codeResources: Data
@@ -219,6 +255,7 @@ enum BundleSigner {
         let (signed, _) = try MachOCodeSigner.sign(
             image: image,
             identifier: identifier,
+            credential: credential,
             entitlementsXML: entitlementsXML,
             extraSpecialSlots: specialSlots,
             specialSlotCount: maximumSpecialSlot(
@@ -233,12 +270,14 @@ enum BundleSigner {
     private static func signStandaloneMachO(
         at url: URL,
         identifier: String,
+        credential: SigningCredential?,
         entitlementsXML: Data?
     ) throws {
         let image = try MachOImage(contentsOf: url)
         let (signed, _) = try MachOCodeSigner.sign(
             image: image,
             identifier: identifier,
+            credential: credential,
             entitlementsXML: entitlementsXML)
         try signed.write(to: url, options: .atomic)
     }

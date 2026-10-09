@@ -98,6 +98,27 @@ jobs:
           # zero-padding discovery, and the no-room error path.
           python3 tools/test_macho_logic.py
 
+      - name: Code signing algorithm tests
+        run: |
+          set -euo pipefail
+          # Re-derives the CodeDirectory, SuperBlob and three-step signing
+          # order independently, then asserts the invariants that make them
+          # work: codeLimit equals the signature offset, blob lengths do not
+          # depend on their contents, and writing __LINKEDIT after hashing
+          # breaks the seal (the bug this guard exists for). Also replays the
+          # whole pass over a real shipping binary when one is present.
+          python3 tools/test_codesign_logic.py
+
+      - name: CMS signature structure tests
+        run: |
+          set -euo pipefail
+          # Mirrors CMSSigner's PKCS#7 layout in Python and validates it with
+          # openssl: the correct form (detached, no signedAttrs, [0] IMPLICIT
+          # certificates) must verify, and each of the four canonical mistakes
+          # must be rejected. Then asserts the length-stability property the
+          # three-step signing pass depends on. Needs no Apple framework.
+          python3 tools/test_cms_logic.py
+
       - name: Verify every Swift file is in the Sources phase
         run: |
           set -euo pipefail

@@ -17,6 +17,9 @@
 		4DC24CA79253BF7EB679D87F /* ProcessRedirects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 365B1B4FE1C64B0CB0910C80; };
 		437E1E9E2F841D60B760C908 /* GuestResigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F58FE9A2373E1EB50B29D3E; };
 		2D079EA226E3895E93C4EEB9 /* ASN1Writer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0FE1E6A1F0B787EDFAEE958; };
+		D82669E334BE53CC471111FA /* CMSSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20C0A71AFBFF78A0E052CCC; };
+		2F7C2E148B7EA84059F184A4 /* SigningContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB006327480CABEC07F3836B; };
+		7E60B330B36230D269CAC925 /* IPAExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9D511DC322751F84593DC98; };
 		2C107F7A7844073B23EF6288 /* CodeDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8841B07F9FC373F4CDDA99AD; };
 		35BBB7D2D47460A4276AC00A /* CodeSignatureBlob.swift in Sources */ = {isa = PBXBuildFile; fileRef = B361E91E3A3B4D236C6764D2; };
 		F82E8127EF72E3D2AAB14C04 /* MachOCodeSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA3960A16A1CEA6BB46F8C52; };
@@ -27,7 +30,13 @@
 		EADCF738097ADCC5856956E2 /* MachOPatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF05746F28A5BB8B55816138; };
 		E6338557A8C5ED6E196BBDE6 /* KeychainGroupAllocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCAE5183480DB3509A4D9685; };
 		3FFB520B90922F51A9A98E86 /* SHA256.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDA3BE23B37507B9F99B0C26; };
+		39D57EC03BBAE0CDD2BF92DD /* SigningCertificate.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE72C347BFFBA0E77080766; };
+		64BDFF2DAE33A6273082FBDC /* SigningKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03CD09F111451C6555975573; };
+		CE1D440DA1281558C030F5F0 /* CertificateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D798F16AF3F27D15870F52F; };
+		059273B2B54E073017F2CAE5 /* CertificateImportError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 948BDF2DFFBF62F6DD91E377; };
+		38388F66ED7546936CDFDBBA /* CertificateImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8E6BFBDD1F6AAFB426F62D5; };
 		B2638CB62FDC85F97E497D2E /* AppLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC91A772C71AE0BEA1F5E8D3; };
+		BCB65DEC36553C5A648C0B98 /* CertificateListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86A8A5F24E8E94350A3D64F0; };
 		1E876A25BDD29C69D8A99A59 /* GuestDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32574C87249E03A46EDF3FC9; };
 		A8E419424E797A2D77DD01FB /* ContainerWindowRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 611777D7447AF4BE5F638D08; };
 		03A867BE54CA1C4C1C292623 /* ContainerWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7324DB4B0950E23EDF0D09C; };
@@ -50,6 +59,9 @@
 		365B1B4FE1C64B0CB0910C80 /* ProcessRedirects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRedirects.swift; sourceTree = "<group>"; };
 		6F58FE9A2373E1EB50B29D3E /* GuestResigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuestResigner.swift; sourceTree = "<group>"; };
 		C0FE1E6A1F0B787EDFAEE958 /* ASN1Writer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASN1Writer.swift; sourceTree = "<group>"; };
+		A20C0A71AFBFF78A0E052CCC /* CMSSigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CMSSigner.swift; sourceTree = "<group>"; };
+		FB006327480CABEC07F3836B /* SigningContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningContext.swift; sourceTree = "<group>"; };
+		F9D511DC322751F84593DC98 /* IPAExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPAExporter.swift; sourceTree = "<group>"; };
 		8841B07F9FC373F4CDDA99AD /* CodeDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeDirectory.swift; sourceTree = "<group>"; };
 		B361E91E3A3B4D236C6764D2 /* CodeSignatureBlob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeSignatureBlob.swift; sourceTree = "<group>"; };
 		FA3960A16A1CEA6BB46F8C52 /* MachOCodeSigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachOCodeSigner.swift; sourceTree = "<group>"; };
@@ -60,7 +72,13 @@
 		EF05746F28A5BB8B55816138 /* MachOPatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachOPatcher.swift; sourceTree = "<group>"; };
 		DCAE5183480DB3509A4D9685 /* KeychainGroupAllocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainGroupAllocator.swift; sourceTree = "<group>"; };
 		BDA3BE23B37507B9F99B0C26 /* SHA256.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SHA256.swift; sourceTree = "<group>"; };
+		FCE72C347BFFBA0E77080766 /* SigningCertificate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningCertificate.swift; sourceTree = "<group>"; };
+		03CD09F111451C6555975573 /* SigningKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningKeychain.swift; sourceTree = "<group>"; };
+		3D798F16AF3F27D15870F52F /* CertificateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateStore.swift; sourceTree = "<group>"; };
+		948BDF2DFFBF62F6DD91E377 /* CertificateImportError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateImportError.swift; sourceTree = "<group>"; };
+		F8E6BFBDD1F6AAFB426F62D5 /* CertificateImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateImporter.swift; sourceTree = "<group>"; };
 		BC91A772C71AE0BEA1F5E8D3 /* AppLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLibraryView.swift; sourceTree = "<group>"; };
+		86A8A5F24E8E94350A3D64F0 /* CertificateListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateListView.swift; sourceTree = "<group>"; };
 		32574C87249E03A46EDF3FC9 /* GuestDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuestDetailView.swift; sourceTree = "<group>"; };
 		611777D7447AF4BE5F638D08 /* ContainerWindowRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContainerWindowRootView.swift; sourceTree = "<group>"; };
 		B7324DB4B0950E23EDF0D09C /* ContainerWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContainerWindow.swift; sourceTree = "<group>"; };
@@ -165,6 +183,11 @@
 				children = (
 				DCAE5183480DB3509A4D9685 /* KeychainGroupAllocator.swift */,
 				BDA3BE23B37507B9F99B0C26 /* SHA256.swift */,
+				FCE72C347BFFBA0E77080766 /* SigningCertificate.swift */,
+				03CD09F111451C6555975573 /* SigningKeychain.swift */,
+				3D798F16AF3F27D15870F52F /* CertificateStore.swift */,
+				948BDF2DFFBF62F6DD91E377 /* CertificateImportError.swift */,
+				F8E6BFBDD1F6AAFB426F62D5 /* CertificateImporter.swift */,
 				);
 				path = Security;
 				sourceTree = "<group>";
@@ -173,6 +196,9 @@
 			isa = PBXGroup;
 			children = (
 				C0FE1E6A1F0B787EDFAEE958 /* ASN1Writer.swift */,
+				A20C0A71AFBFF78A0E052CCC /* CMSSigner.swift */,
+				FB006327480CABEC07F3836B /* SigningContext.swift */,
+				F9D511DC322751F84593DC98 /* IPAExporter.swift */,
 				8841B07F9FC373F4CDDA99AD /* CodeDirectory.swift */,
 				B361E91E3A3B4D236C6764D2 /* CodeSignatureBlob.swift */,
 				FA3960A16A1CEA6BB46F8C52 /* MachOCodeSigner.swift */,
@@ -198,6 +224,7 @@
 				isa = PBXGroup;
 				children = (
 				BC91A772C71AE0BEA1F5E8D3 /* AppLibraryView.swift */,
+				86A8A5F24E8E94350A3D64F0 /* CertificateListView.swift */,
 				32574C87249E03A46EDF3FC9 /* GuestDetailView.swift */,
 				);
 				path = AppLibrary;
@@ -333,6 +360,9 @@
 				4DC24CA79253BF7EB679D87F /* ProcessRedirects.swift in Sources */,
 				437E1E9E2F841D60B760C908 /* GuestResigner.swift in Sources */,
 				2D079EA226E3895E93C4EEB9 /* ASN1Writer.swift in Sources */,
+				D82669E334BE53CC471111FA /* CMSSigner.swift in Sources */,
+				2F7C2E148B7EA84059F184A4 /* SigningContext.swift in Sources */,
+				7E60B330B36230D269CAC925 /* IPAExporter.swift in Sources */,
 				2C107F7A7844073B23EF6288 /* CodeDirectory.swift in Sources */,
 				35BBB7D2D47460A4276AC00A /* CodeSignatureBlob.swift in Sources */,
 				F82E8127EF72E3D2AAB14C04 /* MachOCodeSigner.swift in Sources */,
@@ -344,7 +374,13 @@
 				EADCF738097ADCC5856956E2 /* MachOPatcher.swift in Sources */,
 				E6338557A8C5ED6E196BBDE6 /* KeychainGroupAllocator.swift in Sources */,
 				3FFB520B90922F51A9A98E86 /* SHA256.swift in Sources */,
+				39D57EC03BBAE0CDD2BF92DD /* SigningCertificate.swift in Sources */,
+				64BDFF2DAE33A6273082FBDC /* SigningKeychain.swift in Sources */,
+				CE1D440DA1281558C030F5F0 /* CertificateStore.swift in Sources */,
+				059273B2B54E073017F2CAE5 /* CertificateImportError.swift in Sources */,
+				38388F66ED7546936CDFDBBA /* CertificateImporter.swift in Sources */,
 				B2638CB62FDC85F97E497D2E /* AppLibraryView.swift in Sources */,
+				BCB65DEC36553C5A648C0B98 /* CertificateListView.swift in Sources */,
 				1E876A25BDD29C69D8A99A59 /* GuestDetailView.swift in Sources */,
 				A8E419424E797A2D77DD01FB /* ContainerWindowRootView.swift in Sources */,
 				03A867BE54CA1C4C1C292623 /* ContainerWindow.swift in Sources */,

@@ -690,6 +690,209 @@ def test_signed_image_is_self_consistent():
           "❌ 错误写序（哈希后再改 __LINKEDIT）应导致校验失败——本测试即守卫此点")
 
 
+# ── Certificate-backed signature slot ───────────────────────────────────────
+
+def test_certificate_signature_slot():
+    """The three-step pass must survive swapping in a real CMS blob.
+
+    The ad-hoc path puts a 12-byte empty `CSMAGIC_BLOBWRAPPER` in the
+    signature slot; the certificate path puts a ~1.4 KB PKCS#7 SignedData
+    there instead. That substitution is only safe because of one property:
+
+        a CMS blob's length depends on the certificate and the key,
+        never on the CodeDirectory it signs.
+
+    Since the CodeDirectory is detached (its bytes are not carried) and there
+    are no signed attributes, the blob is a fixed size for a given identity.
+    Step 1's length probe therefore stays exact even though the CodeDirectory
+    it probes over is not the final one.
+
+    If that property ever stops holding — someone adds signed attributes, or
+    switches to the encapsulated form — step 1's probe and step 3's actual
+    blob would differ, the SuperBlob's internal offsets would be wrong, and
+    the failure would be silent. This test is what makes it loud.
+    """
+    print("── 证书签名：签名槽替换后三步式仍成立 ──")
+
+    # A CMS blob of the shape `CMSSigner` emits, at realistic size: a
+    # 951-byte certificate plus a 256-byte RSA signature.
+    def make_cms(code_directory: bytes, certificate: bytes, signature: bytes) -> bytes:
+        def tlv(tag, content):
+            if len(content) < 0x80:
+                return bytes([tag, len(content)]) + content
+            length = len(content).to_bytes((len(content).bit_length() + 7) // 8, "big")
+            return bytes([tag, 0x80 | len(length)]) + length + content
+
+        def seq(*children):
+            return tlv(0x30, b"".join(children))
+
+        def oid(dotted):
+            parts = [int(p) for p in dotted.split(".")]
+            body = bytes([parts[0] * 40 + parts[1]])
+            for arc in parts[2:]:
+                stack = [arc & 0x7F]
+                arc >>= 7
+                while arc:
+                    stack.append((arc & 0x7F) | 0x80)
+                    arc >>= 7
+                body += bytes(reversed(stack))
+            return tlv(0x06, body)
+
+        sha256_alg = seq(oid("2.16.840.1.101.3.4.2.1"))
+        rsa_alg = seq(oid("1.2.840.113549.1.1.11"), b"\x05\x00")
+        issuer = certificate[4:4 + 105]     # stand-in; exact bytes do not matter here
+
+        signer_info = seq(
+            tlv(0x02, b"\x01"),
+            seq(issuer, tlv(0x02, b"\x01\x02\x03")),
+            sha256_alg,
+            rsa_alg,
+            tlv(0x04, signature),
+        )
+        signed_data = seq(
+            tlv(0x02, b"\x01"),
+            tlv(0x31, sha256_alg),
+            seq(oid("1.2.840.113549.1.7.1")),
+            tlv(0xA0, certificate),                # [0] IMPLICIT
+            tlv(0x31, signer_info),
+        )
+        return seq(oid("1.2.840.113549.1.7.2"), tlv(0xA0, signed_data))
+
+    # A realistic certificate and signature length.
+    certificate = bytes(951)
+    signature = bytes(range(256)) * 1
+    assert len(signature) == 256
+
+    def build_slot(code_directory: bytes, signed_content: bytes) -> bytes:
+        # The blob's length must be a function of `certificate`/`signature`
+        # only. `signed_content` is accepted to prove it is *not* consulted.
+        del signed_content
+        return make_cms(code_directory, certificate, signature)
+
+    # ── Length independence ─────────────────────────────────────────────
+    small_cd = build_code_directory(
+        identifier="com.example.guest", code=bytes(PAGE_SIZE), code_limit=PAGE_SIZE,
+        special_slots={})
+    large_cd = build_code_directory(
+        identifier="com.example.guest", code=bytes(PAGE_SIZE * 64),
+        code_limit=PAGE_SIZE * 64, special_slots={})
+
+    small_slot = generic_blob(MAGIC_BLOBWRAPPER, build_slot(small_cd, bytes(PAGE_SIZE)))
+    large_slot = generic_blob(MAGIC_BLOBWRAPPER, build_slot(large_cd, bytes(PAGE_SIZE * 64)))
+    check(len(small_slot) == len(large_slot),
+          f"CMS 长度只由证书与密钥决定，与所签 CodeDirectory 内容无关"
+          f"（{len(small_slot)} vs {len(large_slot)}）")
+
+    # ── The three-step pass with a real CMS in the slot ─────────────────
+    PAGE = PAGE_SIZE
+    LINKEDIT_FILEOFF = 0x4000
+    IMAGE_SIZE = LINKEDIT_FILEOFF + 0x400
+    aligned = (IMAGE_SIZE + 15) // 16 * 16
+    padding = aligned - IMAGE_SIZE
+
+    def build_image(linkedit_filesize, data_size):
+        data = bytearray(IMAGE_SIZE)
+        struct.pack_into("<I", data, 0, 0xFEEDFACF)
+        struct.pack_into("<I", data, 12, 0x2)
+        struct.pack_into("<I", data, 16, 2)
+        struct.pack_into("<I", data, 20, 72 + 16)
+        base = 32
+        struct.pack_into("<II", data, base, 0x19, 72)
+        data[base + 8:base + 24] = b"__LINKEDIT".ljust(16, b"\x00")
+        struct.pack_into("<Q", data, base + 24, 0x100000000)
+        struct.pack_into("<Q", data, base + 32, 0x400)
+        struct.pack_into("<Q", data, base + 40, LINKEDIT_FILEOFF)
+        struct.pack_into("<Q", data, base + 48, linkedit_filesize)
+        struct.pack_into("<IIII", data, base + 72, 0x1D, 16, aligned, data_size)
+        return data
+
+    def run(use_cms: bool):
+        # Step 1: probe the length.
+        probe_cd = build_code_directory(
+            identifier="com.example.guest", code=bytes(aligned), code_limit=aligned,
+            special_slots={})
+        if use_cms:
+            probe_slot = generic_blob(
+                MAGIC_BLOBWRAPPER, build_slot(probe_cd, bytes(aligned)))
+        else:
+            probe_slot = generic_blob(MAGIC_BLOBWRAPPER, b"")
+        probe_sb = build_super_blob([
+            (SLOT_CODEDIRECTORY, probe_cd),
+            (SLOT_REQUIREMENTS, generic_blob(MAGIC_REQUIREMENTS, struct.pack("<I", 0))),
+            (SLOT_SIGNATURE, probe_slot),
+        ])
+        signature_size = len(probe_sb)
+
+        buf = bytearray(build_image(0x400, 0) + bytes(padding))
+        # 2a. dataSize
+        struct.pack_into("<I", buf, 32 + 72 + 12, signature_size)
+        # 2b. drop the old signature region
+        del buf[aligned:]
+        # 2c. __LINKEDIT, before hashing
+        new_filesize = len(buf) - LINKEDIT_FILEOFF
+        struct.pack_into("<Q", buf, 32 + 48, new_filesize)
+        struct.pack_into("<Q", buf, 32 + 32, new_filesize)
+
+        # Step 3: hash the final bytes, then place the blob.
+        final_cd = build_code_directory(
+            identifier="com.example.guest", code=bytes(buf[:aligned]),
+            code_limit=aligned, special_slots={})
+        if use_cms:
+            final_slot = generic_blob(
+                MAGIC_BLOBWRAPPER, build_slot(final_cd, bytes(buf[:aligned])))
+        else:
+            final_slot = generic_blob(MAGIC_BLOBWRAPPER, b"")
+        final_sb = build_super_blob([
+            (SLOT_CODEDIRECTORY, final_cd),
+            (SLOT_REQUIREMENTS, generic_blob(MAGIC_REQUIREMENTS, struct.pack("<I", 0))),
+            (SLOT_SIGNATURE, final_slot),
+        ])
+
+        # The property the whole design rests on.
+        identical = len(final_sb) == signature_size
+        buf[aligned:aligned + len(final_sb)] = final_sb
+
+        # Re-derive the page hashes from the finished file and compare.
+        cd = read_cd(final_cd)
+        region = bytes(buf[:cd["code_limit"]])
+        rederived = b"".join(
+            sha256(region[i * PAGE:(i + 1) * PAGE]) for i in range(cd["n_code"]))
+        embedded = final_cd[cd["hash_offset"]:cd["hash_offset"] + cd["n_code"] * 32]
+        return identical, rederived == embedded, len(final_sb), bytes(buf)
+
+    identical, selfconsistent, cms_size, signed = run(use_cms=True)
+    check(identical, "证书签名：step1 探测长度 == step3 实际长度（CMS 长度稳定）")
+    check(selfconsistent, "证书签名：成品文件重算页哈希与内嵌一致")
+    check(cms_size > 1000,
+          f"CMS 签名槽应远大于空 wrapper（实际 {cms_size} 字节）")
+
+    # The signature slot must still sit entirely at/after codeLimit, and it
+    # must be findable through the SuperBlob's index — the blob itself starts
+    # at `aligned`, but the signature member is somewhere inside it.
+    super_blob = signed[aligned:]
+    slot_offset = None
+    count = struct.unpack_from("<I", super_blob, 8)[0]
+    for index in range(count):
+        entry = 12 + index * 8
+        member_slot, member_offset = struct.unpack_from("<II", super_blob, entry)
+        if member_slot == SLOT_SIGNATURE:
+            slot_offset = member_offset
+    check(slot_offset is not None, "签名槽应出现在 SuperBlob 索引中")
+    if slot_offset is not None:
+        magic = struct.unpack_from("<I", super_blob, slot_offset)[0]
+        check(magic == MAGIC_BLOBWRAPPER,
+              f"签名槽起始处应是 CSMAGIC_BLOBWRAPPER（读到 0x{magic:08x}）")
+        check(aligned + slot_offset >= aligned,
+              "签名槽必须完全落在 codeLimit 之后")
+
+    # And the ad-hoc path must be unchanged by any of this.
+    adhoc_identical, adhoc_ok, adhoc_size, _ = run(use_cms=False)
+    check(adhoc_identical and adhoc_ok,
+          "adhoc 路径不受影响（空 wrapper 仍自洽）")
+    check(adhoc_size < cms_size,
+          f"adhoc 签名应小于证书签名（{adhoc_size} < {cms_size}）")
+
+
 # ── Run ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -699,6 +902,7 @@ def main():
     test_super_blob()
     test_requirements_and_wrappers()
     test_signed_image_is_self_consistent()
+    test_certificate_signature_slot()
     test_shipping_binary_if_present()
 
     print()

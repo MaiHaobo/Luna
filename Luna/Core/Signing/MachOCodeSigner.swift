@@ -88,24 +88,40 @@ enum MachOCodeSigner {
     /// - Parameters:
     ///   - image: the parsed, already-patched binary.
     ///   - identifier: `CFBundleIdentifier`-equivalent string for the code.
-    ///   - teamID: team identifier, or `nil` for a signature with none.
-    ///   - entitlementsXML: XML plist bytes to embed, or `nil` for none.
+    ///   - credential: the certificate to sign with, or `nil` for an ad-hoc
+    ///     signature. Ad-hoc is not a degraded mode here — it is what a guest
+    ///     with no imported certificate gets, and it is a complete, valid
+    ///     signature for a binary that is never going to be installed by iOS.
+    ///   - entitlementsXML: XML plist bytes to embed, or `nil` for none. The
+    ///     credential carries its own copy for the main bundle; this parameter
+    ///     exists for the nested-code case, where entitlements are
+    ///     deliberately withheld.
     ///   - extraSpecialSlots: slots the *bundle* signer owns and has already
     ///     hashed — `Info.plist` (`CSSLOT_INFOSLOT`) and the resource seal
-    ///     (`CSSLOT_RESOURCEDIR`). They are merged with the ones this function
+    ///     (`CSSLOT_RESDIR`). They are merged with the ones this function
     ///     computes, because the CodeDirectory hashes all of them together.
     ///   - specialSlotCount: reserved special slots. Must be at least as large
     ///     as the highest slot actually populated.
     static func sign(
         image: MachOImage,
         identifier: String,
-        teamID: String? = nil,
+        credential: SigningCredential? = nil,
         entitlementsXML: Data? = nil,
         extraSpecialSlots: [UInt32: [UInt8]] = [:],
         specialSlotCount: UInt32? = nil
     ) throws -> (data: Data, report: MachOSignReport) {
 
         guard !identifier.isEmpty else { throw CodeSignError.identifierMissing }
+
+        // A certificate-backed signature has to name its team: the
+        // CodeDirectory's `teamID` field is part of what the verifier checks
+        // against the certificate. Refuse rather than emit one that will be
+        // rejected on the device.
+        if let credential, credential.teamID.isEmpty {
+            throw CodeSignError.signingFailed("证书签名的 teamID 不能为空")
+        }
+
+        let effectiveTeamID = credential?.teamID
 
         var buffer = image.data
 
@@ -161,7 +177,6 @@ enum MachOCodeSigner {
         let entitlementsBlob = entitlementsXML.map {
             SuperBlobBuilder.entitlementsBlob(xml: $0)
         }
-        let signatureWrapper = SuperBlobBuilder.emptySignatureWrapper()
 
         var specialSlots: [UInt32: [UInt8]] = extraSpecialSlots
         if let entitlementsBlob {
@@ -179,7 +194,7 @@ enum MachOCodeSigner {
         func makeInput(code: Data) -> CodeDirectoryInput {
             CodeDirectoryInput(
                 identifier: identifier,
-                teamID: teamID,
+                teamID: effectiveTeamID,
                 code: code,
                 codeLimit: UInt32(signatureOffset),
                 specialSlots: specialSlots,
@@ -189,11 +204,37 @@ enum MachOCodeSigner {
                 execSegFlags: image.fileType == MachOFileType.execute
                     ? CodeSignExecSeg.mainBinary
                     : 0,
-                flags: CodeSignFlag.adhoc,
+                // `CodeSignFlag.adhoc` is a *claim* that this signature has no
+                // certificate behind it. Left set on a certificate-backed
+                // signature it contradicts the CMS blob sitting in the same
+                // SuperBlob, and a verifier that believes the flag skips the
+                // certificate check entirely.
+                flags: credential == nil ? CodeSignFlag.adhoc : 0,
                 pageSize: CodeDirectoryBuilder.pageSizeExponent)
         }
 
-        func assemble(codeDirectory: Data) -> Data {
+        /// Builds the signature slot for a given CodeDirectory.
+        ///
+        /// A closure rather than a value because the CMS blob signs the
+        /// CodeDirectory, and the final CodeDirectory is not known until step
+        /// 3. Its *length*, however, is known the moment we have any
+        /// CodeDirectory of the right shape — see the comment on step 1.
+        func makeSignatureWrapper(codeDirectory: Data) throws -> Data {
+            guard let credential else {
+                // Ad-hoc: an empty `CSMAGIC_BLOBWRAPPER`, which is what
+                // `codesign -s -` writes.
+                return SuperBlobBuilder.emptySignatureWrapper()
+            }
+            return SuperBlobBuilder.genericBlob(
+                magic: CodeSignMagic.blobWrapper,
+                payload: try CMSSigner.signedData(
+                    codeDirectory: codeDirectory,
+                    certificate: credential.leafCertificate,
+                    key: credential.privateKey,
+                    algorithm: credential.algorithm))
+        }
+
+        func assemble(codeDirectory: Data) throws -> Data {
             var members: [SuperBlobMember] = [
                 SuperBlobMember(slot: CodeSignSlot.codeDirectory, blob: codeDirectory),
                 SuperBlobMember(slot: CodeSignSlot.requirements,
@@ -204,12 +245,22 @@ enum MachOCodeSigner {
                     slot: CodeSignSlot.entitlements, blob: entitlementsBlob))
             }
             members.append(SuperBlobMember(
-                slot: CodeSignSlot.signature, blob: signatureWrapper))
+                slot: CodeSignSlot.signature,
+                blob: try makeSignatureWrapper(codeDirectory: codeDirectory)))
             return SuperBlobBuilder.build(members: members)
         }
 
         // Step 1: build once purely to learn the final length.
-        let plannedSuperBlob = assemble(
+        //
+        // This works for the certificate case too, and the reason is worth
+        // spelling out. A CMS blob's size is driven by the certificate's DER
+        // and the key's signature length; the CodeDirectory it signs is
+        // *detached* (never carried) and there are no signed attributes, so
+        // nothing about the blob's length depends on the CodeDirectory's
+        // contents. A probe built over the pre-edit bytes is therefore exactly
+        // as long as the final blob, which is what makes the rest of this
+        // function sound.
+        let plannedSuperBlob = try assemble(
             codeDirectory: try CodeDirectoryBuilder.build(makeInput(code: buffer)))
         let signatureSize = plannedSuperBlob.count
 
@@ -261,8 +312,11 @@ enum MachOCodeSigner {
         }
 
         // Step 3: recompute over the final bytes and place the blob.
+        //
+        // This is where the CMS signature is actually produced — over the
+        // authoritative bytes, after every pre-`codeLimit` field has settled.
         let finalCodeDirectory = try CodeDirectoryBuilder.build(makeInput(code: buffer))
-        let finalSuperBlob = assemble(codeDirectory: finalCodeDirectory)
+        let finalSuperBlob = try assemble(codeDirectory: finalCodeDirectory)
         assert(finalSuperBlob.count == signatureSize,
                "CodeDirectory length must not depend on its contents")
 

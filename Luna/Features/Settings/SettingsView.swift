@@ -11,6 +11,7 @@ import UIKit
 struct SettingsView: View {
 
     @EnvironmentObject private var store: GuestStore
+    @EnvironmentObject private var certificates: CertificateStore
     @EnvironmentObject private var coordinator: SessionCoordinator
 
     @State private var storageReport: StorageReport?
@@ -20,6 +21,25 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("签名证书") {
+                    NavigationLink {
+                        CertificateListView()
+                            .environmentObject(certificates)
+                    } label: {
+                        HStack {
+                            Label("管理签名证书", systemImage: "signature")
+                            Spacer(minLength: 8)
+                            Text(certificateSummary)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } footer: {
+                    Text(certificates.certificates.isEmpty
+                         ? "尚未导入证书。导入后可对 guest 做正式签名并导出 IPA。"
+                         : "新签名默认使用被选中的证书。")
+                }
+
                 Section("存储") {
                     if isComputingStorage {
                         HStack {
@@ -39,6 +59,7 @@ struct SettingsView: View {
 
                 Section("容器路径") {
                     pathRow("导入收件夹", LunaPaths.importInboxDirectory.path)
+                    pathRow("证书收件夹", LunaPaths.certificateInboxDirectory.path)
                     pathRow("根目录", LunaPaths.root.path)
                     pathRow("Guest 数据", LunaPaths.guestDataDirectory.path)
                     pathRow("修补产物", LunaPaths.patchedDirectory.path)
@@ -76,6 +97,14 @@ struct SettingsView: View {
                 EntitlementsTemplateView()
             }
         }
+    }
+
+    /// A one-line count for the row's trailing edge.
+    private var certificateSummary: String {
+        let total = certificates.certificates.count
+        guard total > 0 else { return "未导入" }
+        let usable = certificates.usable.count
+        return usable == total ? "\(total) 个" : "\(total) 个（\(usable) 可用）"
     }
 
     private func computeStorage() {
@@ -207,6 +236,7 @@ struct AboutView: View {
                 bullet("解析 Mach-O，识别架构、段、加密状态与依赖")
                 bullet("完成加载前所需的二进制改写（filetype / __PAGEZERO / LC_LOAD_DYLIB）")
                 bullet("为每个 guest 分配独立的 Keychain 访问组")
+                bullet("用自己的开发者证书为 guest 签名，并导出可安装的 IPA")
                 bullet("在应用内的浮层窗口中承载 guest 会话")
             }
 
@@ -215,6 +245,7 @@ struct AboutView: View {
                 bullet("在未获得 JIT 权限的设备上映射 guest 代码", negative: true)
                 bullet("解密 FairPlay 加密的 IPA —— 系统密钥不可及，请使用已解密（脱壳）的构建", negative: true)
                 bullet("验证第三方 IPA 的代码签名或合法性", negative: true)
+                bullet("让过期的证书或描述文件重新有效 —— 到期只能重新申请", negative: true)
                 bullet("隔离 guest 之间的文件访问", negative: true)
             }
 

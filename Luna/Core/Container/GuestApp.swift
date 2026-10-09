@@ -56,8 +56,28 @@ struct SignatureSummary: Codable, Hashable {
     /// `cdhash` of the main binary's CodeDirectory, hex encoded.
     var mainCdhash: String?
 
+    /// Display name of the certificate that signed, when one was used.
+    ///
+    /// `nil` for ad-hoc, and also for signatures produced before this field
+    /// existed — Swift's synthesized `Codable` treats a missing key as `nil`,
+    /// so old manifests keep decoding. Both cases render the same way.
+    var certificateName: String?
+
+    /// Team ID recorded in the signature.
+    var teamID: String?
+
+    /// Set when the user asked for a certificate and Luna fell back to ad-hoc.
+    ///
+    /// Kept so the failure is visible on the detail screen rather than only in
+    /// the moment's alert: a guest signed ad-hoc against the user's intent
+    /// will likely fail to install, and "why" needs to be answerable later.
+    var fellBackReason: String?
+
     var label: String {
-        isAdHoc ? "adhoc（无证书）" : "证书签名"
+        if isAdHoc {
+            return fellBackReason == nil ? "adhoc（无证书）" : "adhoc（回退）"
+        }
+        return certificateName.map { "证书：\($0)" } ?? "证书签名"
     }
 }
 
@@ -243,6 +263,41 @@ enum LunaPaths {
         root.appendingPathComponent("Logs", isDirectory: true)
     }
 
+    /// Imported signing identities, one folder per certificate.
+    ///
+    /// Each folder holds exactly one file — the `.p12` the user supplied —
+    /// and is named after the certificate's UUID so the manifest can find it
+    /// without storing an absolute path. The `.p12` stays encrypted by its
+    /// export password (kept in the keychain); Luna deliberately does not
+    /// wrap it in a second layer of its own encryption, because a home-grown
+    /// envelope is one more thing that can be got wrong and one more thing
+    /// that has to be unwrapped before `SecPKCS12Import` will look at it.
+    static var certificatesDirectory: URL {
+        root.appendingPathComponent("Certificates", isDirectory: true)
+    }
+
+    /// The JSON manifest of imported signing certificates.
+    ///
+    /// Separate from `guests.json` on purpose: certificates are global
+    /// resources that outlive any particular guest, and a corrupt or
+    /// hand-edited guest manifest should never be able to take the signing
+    /// identities down with it.
+    static var certificateManifestURL: URL {
+        root.appendingPathComponent("certificates.json")
+    }
+
+    /// The drop folder for certificate material, reached through the Files
+    /// app.
+    ///
+    /// A sibling of `Import/` rather than a child, and at the top of
+    /// Documents for the same reason: `UIFileSharingEnabled` exposes the
+    /// Documents directory, so users can see both drop folders side by side
+    /// and tell at a glance which one takes IPAs and which one takes `.p12`
+    /// and `.mobileprovision` files.
+    static var certificateInboxDirectory: URL {
+        documentsDirectory.appendingPathComponent("CertImport", isDirectory: true)
+    }
+
     /// The drop folder users reach through the Files app or a desktop Finder.
     ///
     /// Deliberately at the top of Documents rather than under `root/`:
@@ -277,6 +332,10 @@ enum LunaPaths {
     /// browse to it right after first launch. It is deliberately NOT passed to
     /// `excludeFromBackup`: inbox files are the user's own, and users expect
     /// copies they placed there to survive a restore.
+    ///
+    /// The certificate *store* is excluded from backup, since it can be
+    /// re-imported from the original `.p12`; the certificate *inbox* is not,
+    /// for the same reason as the IPA inbox.
     static func bootstrap() throws {
         for directory in [
             root,
@@ -285,11 +344,14 @@ enum LunaPaths {
             patchedDirectory,
             logsDirectory,
             importInboxDirectory,
+            certificatesDirectory,
+            certificateInboxDirectory,
         ] {
             try FileManager.default.createDirectory(
                 at: directory, withIntermediateDirectories: true)
         }
         excludeFromBackup(patchedDirectory)
+        excludeFromBackup(certificatesDirectory)
     }
 
     /// Marks a directory as excluded from iCloud/iTunes backup.

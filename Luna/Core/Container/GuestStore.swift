@@ -363,15 +363,22 @@ final class GuestStore: ObservableObject {
     /// every binary and every resource in the bundle, which on a large app is
     /// seconds of CPU. Only the published-state updates hop back.
     ///
+    /// - Parameter certificate: the identity to sign with, or `nil` for an
+    ///   ad-hoc signature. The certificate is passed as its *record*; the key
+    ///   material is looked up inside the background task, because a `SecKey`
+    ///   is not `Sendable` and handing one across an isolation boundary is
+    ///   exactly the kind of thing that works in a test and races in practice.
+    ///
     /// Returns `true` when a signature was written. Failure is recorded in
     /// `lastError` rather than thrown, because the caller is a button.
     @discardableResult
-    func resign(_ guest: GuestApp) async -> Bool {
+    func resign(_ guest: GuestApp, certificate: SigningCertificate? = nil) async -> Bool {
         signingStage = "准备签名…"
         defer { signingStage = nil }
 
         do {
-            let report = try await Self.performResignOffMainActor(guest: guest)
+            let report = try await Self.performResignOffMainActor(
+                guest: guest, certificate: certificate)
 
             var updated = guest
             updated.state = .signed
@@ -380,8 +387,11 @@ final class GuestStore: ObservableObject {
                 binaryCount: report.signature.signedBinaries.count,
                 resourceCount: report.signature.resourceCount,
                 signedAt: Date(),
-                mainCdhash: nil)
-            updated.lastError = nil
+                mainCdhash: nil,
+                certificateName: report.certificateName,
+                teamID: report.teamID,
+                fellBackReason: report.fellBackToAdHoc)
+            updated.lastError = report.fellBackToAdHoc
             update(updated)
             return true
         } catch {
@@ -404,18 +414,157 @@ final class GuestStore: ObservableObject {
     /// `nonisolated` to be callable from one, hence the static helper rather
     /// than a method on this `@MainActor` class.
     ///
+    /// Everything that touches the keychain — reading the `.p12` password,
+    /// pulling out the private key, re-importing the identity — happens inside
+    /// the task, not before it. `SecIdentity` and `SecKey` are not `Sendable`,
+    /// and a `SigningCredential` holding them is therefore not either; keeping
+    /// its construction on the far side of the boundary is what keeps the
+    /// compiler's concurrency checking honest instead of merely quiet.
+    ///
     /// The stage callback is deliberately *not* forwarded into this helper:
     /// a closure that hops back to the main actor would have to cross an
     /// isolation boundary, and the four stages are coarse enough that the
     /// caller can narrate them itself.
     nonisolated private static func performResignOffMainActor(
-        guest: GuestApp
+        guest: GuestApp,
+        certificate: SigningCertificate?
     ) async throws -> ResignReport {
         try await Task.detached(priority: .userInitiated) {
             // `GuestApp` is a value type, so capturing it here copies; the
             // detached task therefore never touches main-actor state.
-            try GuestResigner.resign(guest: guest)
+            guard let certificate else {
+                return try GuestResigner.resign(guest: guest)
+            }
+
+            // A certificate was requested. If the material behind it has gone
+            // missing — a restore onto a new device drops the `ThisDeviceOnly`
+            // keychain item — fall back to ad-hoc rather than failing the
+            // whole pass. The user gets a signed, loadable guest and a reason
+            // on the detail screen; the alternative is nothing at all.
+            do {
+                let credential = try resolveCredential(for: certificate, guest: guest)
+                return try GuestResigner.resign(
+                    guest: guest,
+                    credential: credential,
+                    entitlementsXML: credential.entitlementsXML,
+                    embeddedProfile: try profileData(for: certificate))
+            } catch {
+                NSLog("[Luna] certificate signing unavailable: \(error)")
+                var report = try GuestResigner.resign(guest: guest)
+                report.fellBackToAdHoc = error.localizedDescription
+                return report
+            }
         }.value
+    }
+
+    /// Assembles a `SigningCredential` from the keychain and the store's
+    /// files.
+    ///
+    /// `nonisolated` and static so it can run inside the detached task. It
+    /// reads from disk and the keychain and touches no actor state.
+    nonisolated private static func resolveCredential(
+        for certificate: SigningCertificate,
+        guest: GuestApp
+    ) throws -> SigningCredential {
+
+        guard let profile = certificate.profile else {
+            throw CertificateImportError.profileUnreadable("证书没有关联的描述文件")
+        }
+        guard let password = SigningKeychain.password(for: certificate.id) else {
+            throw CertificateImportError.keychainFailure(
+                "找不到 .p12 的导出密码，请重新导入证书")
+        }
+
+        let p12URL = LunaPaths.certificatesDirectory
+            .appendingPathComponent(certificate.id.uuidString, isDirectory: true)
+            .appendingPathComponent(certificate.p12FileName)
+        guard let p12Data = try? Data(contentsOf: p12URL, options: .mappedIfSafe) else {
+            throw CertificateImportError.unreadableFile(p12URL, "文件不存在")
+        }
+
+        let identity = try CertificateImporter.importIdentity(
+            from: p12Data, password: password)
+
+        var leaf: SecCertificate?
+        guard SecIdentityCopyCertificate(identity, &leaf) == errSecSuccess,
+              let leaf else {
+            throw CertificateImportError.noIdentity
+        }
+
+        // Prefer the persisted key: it is the one a later launch will use, and
+        // it survives the `.p12`'s original import. The identity's own key is
+        // the fallback for a certificate whose keychain item was dropped but
+        // whose `.p12` was re-imported this session.
+        let key = SigningKeychain.privateKey(for: certificate.id)
+            ?? {
+                var transient: SecKey?
+                guard SecIdentityCopyPrivateKey(identity, &transient) == errSecSuccess,
+                      let transient else { return nil }
+                return transient
+            }()
+        guard let key else {
+            throw CertificateImportError.missingPrivateKey
+        }
+
+        // Entitlements come from the profile, not from the guest. Inventing
+        // them is the fastest route to a rejected install.
+        let raw = try rawEntitlements(of: certificate, guest: guest)
+
+        return SigningCredential(
+            certificate: certificate,
+            identity: identity,
+            leafCertificate: leaf,
+            privateKey: key,
+            algorithm: try KeyAlgorithm.of(key),
+            entitlementsXML: EntitlementsBuilder.make(
+                profile: profile,
+                rawEntitlements: raw,
+                bundleIdentifier: guest.bundleIdentifier),
+            teamID: certificate.teamID)
+    }
+
+    /// Re-reads the profile's entitlement dictionary from its original file.
+    ///
+    /// The summary in the manifest is deliberately lossy — it keeps the fields
+    /// that matter for display and for matching, not the whole plist — so the
+    /// entitlements have to come from the profile bytes themselves. Luna keeps
+    /// those alongside the `.p12`, in the certificate's folder.
+    nonisolated private static func rawEntitlements(
+        of certificate: SigningCertificate,
+        guest: GuestApp
+    ) throws -> [String: Any] {
+        let raw = try profileData(for: certificate)
+        guard let dictionary = try? PropertyListSerialization.propertyList(
+                from: CertificateImporter.unwrapProfile(raw) ?? raw,
+                options: [], format: nil) as? [String: Any],
+              let entitlements = dictionary["Entitlements"] as? [String: Any]
+        else {
+            throw CertificateImportError.profileUnreadable("无法读取 Entitlements")
+        }
+        return entitlements
+    }
+
+    /// The `.mobileprovision` bytes to embed in the signed bundle.
+    nonisolated private static func profileData(
+        for certificate: SigningCertificate
+    ) throws -> Data {
+        let url = profileURL(for: certificate)
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
+            throw CertificateImportError.unreadableFile(url, "描述文件不存在")
+        }
+        return data
+    }
+
+    /// Where a certificate's profile is kept.
+    ///
+    /// Sibling of the `.p12` in the certificate's folder. Not named in the
+    /// manifest because the name is fixed.
+    nonisolated private static func profileURL(
+        for certificate: SigningCertificate
+    ) -> URL {
+        LunaPaths.certificatesDirectory
+            .appendingPathComponent(certificate.id.uuidString, isDirectory: true)
+            .appendingPathComponent("profile.mobileprovision")
     }
 
     private func removeStorage(for guest: GuestApp) {

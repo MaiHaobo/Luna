@@ -23,11 +23,22 @@
 //  the patched-and-signed tree lives under `Patched/<uuid>/`. That directory
 //  is already excluded from backup, which is correct for derived data.
 //
-//  This stage produces an **ad-hoc** signature: no certificate, no CMS blob,
-//  and `CS_ADHOC` set in the CodeDirectory flags. That is the same signature
-//  `codesign -s -` writes, and it is enough to load a guest on a build that
-//  has JIT permission. Adding a certificate later means filling the signature
-//  slot with a real CMS blob — the rest of this pipeline does not change.
+//  TWO KINDS OF SIGNATURE
+//  ----------------------
+//  Without an imported certificate, this produces an **ad-hoc** signature: no
+//  CMS blob, and `CS_ADHOC` set in the CodeDirectory flags. That is the same
+//  signature `codesign -s -` writes, and it is enough to load a guest on a
+//  build that has JIT permission.
+//
+//  With a certificate, the signature slot holds a real PKCS#7 SignedData and
+//  the ad-hoc flag is cleared. The two paths share everything except that
+//  slot, which is why this function takes one optional `SigningCredential`
+//  rather than branching early.
+//
+//  A certificate-signed guest also gets its profile written into the bundle
+//  as `embedded.mobileprovision`. Without it, iOS has nothing to match the
+//  signature's entitlements against and refuses the app — so the two always
+//  travel together.
 //
 
 import Foundation
@@ -42,10 +53,27 @@ struct ResignReport {
     var signature: BundleSignReport
     /// True when this is an ad-hoc signature (no certificate).
     var isAdHoc: Bool
+    /// Display name of the signing certificate, when one was used.
+    var certificateName: String?
+    /// Team ID recorded in the signature, when one was used.
+    var teamID: String?
+    /// Set when a certificate was offered but ad-hoc was used instead.
+    ///
+    /// The fallback is deliberate — a guest that cannot be loaded at all is
+    /// worse than one signed with a weaker identity — but it must never be
+    /// silent, because the user asked for a certificate and did not get one.
+    var fellBackToAdHoc: String?
 
     var humanReadable: String {
         var lines: [String] = []
-        lines.append(isAdHoc ? "签名类型：adhoc（无证书）" : "签名类型：证书")
+        if let certificateName, let teamID {
+            lines.append("签名类型：证书「\(certificateName)」（团队 \(teamID)）")
+        } else {
+            lines.append("签名类型：adhoc（无证书）")
+        }
+        if let fellBackToAdHoc {
+            lines.append("⚠️ 已回退到 adhoc：\(fellBackToAdHoc)")
+        }
         if let patch {
             lines.append("")
             lines.append("── 二进制修补 ──")
@@ -64,12 +92,16 @@ enum GuestResigner {
     ///
     /// - Parameters:
     ///   - guest: the imported guest. Its `bundleURL` is read, never written.
+    ///   - credential: the certificate to sign with, or `nil` for ad-hoc.
     ///   - entitlementsXML: entitlements to embed. `nil` for a plain ad-hoc
     ///     signature with an empty entitlements set.
+    ///   - embeddedProfile: `.mobileprovision` bytes to place in the bundle.
     ///   - progress: called with a short stage label.
     static func resign(
         guest: GuestApp,
+        credential: SigningCredential? = nil,
         entitlementsXML: Data? = nil,
+        embeddedProfile: Data? = nil,
         progress: ((String) -> Void)? = nil
     ) throws -> ResignReport {
 
@@ -135,12 +167,14 @@ enum GuestResigner {
         }
 
         // ── 3. Sign the bundle ──────────────────────────────────────────────
-        progress?("签名 bundle…")
+        progress?(credential == nil ? "签名 bundle（adhoc）…" : "签名 bundle（证书）…")
         let signature = try BundleSigner.sign(
             bundleURL: stagedBundle,
             executableName: guest.executableName,
             identifier: guest.bundleIdentifier,
-            entitlementsXML: entitlementsXML)
+            credential: credential,
+            entitlementsXML: entitlementsXML,
+            embeddedProfile: embeddedProfile)
 
         progress?("签名完成")
 
@@ -148,7 +182,10 @@ enum GuestResigner {
             signedBundleURL: stagedBundle,
             patch: patchReport,
             signature: signature,
-            isAdHoc: true
+            isAdHoc: credential == nil,
+            certificateName: credential?.certificate.displayName,
+            teamID: credential?.teamID,
+            fellBackToAdHoc: nil
         )
     }
 

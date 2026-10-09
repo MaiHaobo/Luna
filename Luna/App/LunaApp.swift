@@ -9,6 +9,7 @@ import SwiftUI
 struct LunaApp: App {
 
     @StateObject private var store = GuestStore()
+    @StateObject private var certificates = CertificateStore()
     @StateObject private var coordinator: SessionCoordinator
     @Environment(\.scenePhase) private var scenePhase
 
@@ -24,12 +25,21 @@ struct LunaApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(store)
+                .environmentObject(certificates)
                 .environmentObject(coordinator)
                 .task {
                     store.bootstrap()
+                    // Certificates load after the guest store, because
+                    // `bootstrap()` is what creates the directory tree both
+                    // stores read from.
+                    certificates.bootstrap()
                     await store.scanImportInbox()
                 }
                 .onChange(of: scenePhase) { _, phase in
+                    // Certificate *material* dropped in `CertImport/` is
+                    // deliberately not auto-imported: a `.p12` needs a
+                    // password, and there is no way to ask for one from a
+                    // background scan. The list screen imports what it finds.
                     if phase == .active {
                         Task { await store.scanImportInbox() }
                     }
