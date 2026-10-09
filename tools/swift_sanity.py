@@ -190,6 +190,114 @@ def check_call_labels():
                         f"{path}:{n}: 调用 '{call.group(1)}' 出现重复参数标签 {sorted(dupes)}")
 
 
+def check_ambiguous_trailing_closures():
+    """Catch `Section { … } header: { … }` where the content ends in a bare `if`.
+
+    `Section { content } header: { … } footer: { … }` is legal Swift (multiple
+    trailing closures, 5.3+). But it stops being parseable when the *content*
+    closure's last statement is an `if` with no `else`: the parser reads the
+    closing brace as the end of that `if`, and then sees `header:` as a new
+    statement. The errors are reported two lines apart and look unrelated:
+
+        error: consecutive statements on a line must be separated by ';'
+        error: labeled block needs 'do'
+
+    This cost a full CI cycle in `GuestDetailView.signatureSection`. The fix is
+    to name the first closure (`Section(content: { … }, header: { … })`), which
+    removes the ambiguity.
+
+    We find it structurally rather than by regex: track brace depth over the
+    stripped source, and whenever a line closes a brace group, look at what that
+    group was opened by and what its final non-blank line is.
+    """
+    opener = re.compile(r'(Section|Group|List|Form)\s*\{\s*$')
+    label_follow = re.compile(r'^\s*\}\s*(header|footer|title)\s*:\s*\{\s*$')
+
+    for path in FILES:
+        lines = strip_noise(path.read_text()).splitlines()
+
+        for n, line in enumerate(lines):
+            if not label_follow.match(line.rstrip()):
+                continue
+
+            # Find the line that opened the group this one closes.
+            #
+            # A brace balance is the wrong tool: the line we are on contains both
+            # a `}` and a `{`, so the walk steps over the group's own opener when
+            # the body's last statement is a nested `if let … { … }`.
+            #
+            # Indentation alone is not enough either — the opener sits at the
+            # *same* column as the `} header:` that closes it, while the body is
+            # deeper. So: scan upward for the first line that opens a brace
+            # (ends in `{`) and does not itself close one (contains no `}`),
+            # skipping any line indented deeper than the closing brace.
+            indent = len(line) - len(line.lstrip())
+            opener_line = None
+            for back in range(n - 1, max(-1, n - 400), -1):
+                candidate = lines[back]
+                if not candidate.strip():
+                    continue
+                if len(candidate) - len(candidate.lstrip()) > indent:
+                    continue
+                body = candidate.strip()
+                if "}" in body:
+                    # Either a closing line, or a `} else {` — keep looking.
+                    continue
+                if body.endswith("{") or body.endswith(") {"):
+                    opener_line = back
+                    break
+            if opener_line is None:
+                continue
+
+            opener_match = opener.search(lines[opener_line].rstrip())
+            if not opener_match:
+                continue
+
+            # The last top-level statement inside that group. A nested block
+            # (`if let … { … }`) spans several lines, so taking the line directly
+            # above the closing brace picks up the nested block's own `}`. We want
+            # the *outermost* statement, so walk up past bare closing braces and
+            # take the first real line at the group body's indent.
+            body_indent = None
+            for probe in range(opener_line + 1, n):
+                stripped = lines[probe]
+                if stripped.strip():
+                    body_indent = len(stripped) - len(stripped.lstrip())
+                    break
+            if body_indent is None:
+                continue
+
+            last = ""
+            for probe in range(n - 1, opener_line, -1):
+                candidate = lines[probe]
+                if not candidate.strip():
+                    continue
+                if len(candidate) - len(candidate.lstrip()) != body_indent:
+                    continue
+                stripped = candidate.strip()
+                # A bare `}` closes a nested block; keep climbing to find the
+                # statement that block belongs to.
+                if stripped in ("}", "};"):
+                    continue
+                last = stripped
+                break
+
+            if not (last.startswith("if ") or last.startswith("if let ")
+                    or last.startswith("if var ") or last.startswith("guard ")):
+                continue
+            # A `} else {` / `} else if …` closes the branch, so the parser is
+            # not left hanging.
+            if last.startswith("}") or " else" in last:
+                continue
+
+            problems.append(
+                f"{path}:{opener_line + 1}: '{opener_match.group(1)} {{ … }}' 的"
+                f"内容闭包以 '{last[:44]}' 结尾，其后（第 {n + 1} 行）又跟尾随闭包。"
+                f"无 else 的 if 会让解析器把闭合的 '}}' 当作 if 的结束，"
+                f"从而在 'header:'/'footer:' 处报 \"consecutive statements on a line "
+                f"must be separated by ';'\"。把第一个闭包写成显式 'content:' 标签即可")
+
+
 def main():
     if not FILES:
         print("没有找到 Swift 文件")
@@ -207,6 +315,7 @@ def main():
     check_duplicate_types()
     check_private_helpers()
     check_call_labels()
+    check_ambiguous_trailing_closures()
 
     if problems:
         print("❌ 错误：")

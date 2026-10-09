@@ -214,7 +214,14 @@ struct GuestDetailView: View {
     /// loadable, signed copy.
     @ViewBuilder
     private var signatureSection: some View {
-        Section {
+        // `content:` is spelled out deliberately. In the trailing-closure form
+        // (`Section { … } header: …`) the content closure here ends in a bare
+        // `if let` with no `else`, and the parser then reads the following
+        // `} header:` as a continuation of that `if` rather than as a second
+        // trailing closure — Swift rejects it with "consecutive statements on
+        // a line must be separated by ';'". Naming the first closure removes
+        // the ambiguity entirely.
+        Section(content: {
             if let stage = store.signingStage {
                 HStack(spacing: 10) {
                     ProgressView()
@@ -246,22 +253,22 @@ struct GuestDetailView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 }
-            } header: {
-                Text("代码签名")
-            } footer: {
-                if let reason = current.signature?.fellBackReason {
-                    Text("⚠️ 上次签名请求了证书但失败，已回退 adhoc：\(reason)")
-                } else if current.signature == nil {
-                    Text("Luna 尚未为该 guest 生成签名。点下方「签名 / 重签名」执行。")
-                } else if current.signature?.isAdHoc == true {
-                    Text("adhoc 签名不含证书，系统不会基于签名放行加载 —— "
-                         + "仍需 JIT 权限。导入证书后重签名即可去掉这一限制。")
-                } else {
-                    Text("该签名由上方证书签发，并已写入 embedded.mobileprovision。"
-                         + "导出的 IPA 可直接安装到描述文件中登记的设备。")
-                }
             }
-        }
+        }, header: {
+            Text("代码签名")
+        }, footer: {
+            if let reason = current.signature?.fellBackReason {
+                Text("⚠️ 上次签名请求了证书但失败，已回退 adhoc：\(reason)")
+            } else if current.signature == nil {
+                Text("Luna 尚未为该 guest 生成签名。点下方「签名 / 重签名」执行。")
+            } else if current.signature?.isAdHoc == true {
+                Text("adhoc 签名不含证书，系统不会基于签名放行加载 —— "
+                     + "仍需 JIT 权限。导入证书后重签名即可去掉这一限制。")
+            } else {
+                Text("该签名由上方证书签发，并已写入 embedded.mobileprovision。"
+                     + "导出的 IPA 可直接安装到描述文件中登记的设备。")
+            }
+        })
     }
 
     /// Picks which certificate to sign with.
@@ -272,7 +279,10 @@ struct GuestDetailView: View {
     @ViewBuilder
     private var signingIdentitySection: some View {
         if !certificates.certificates.isEmpty {
-            Section {
+            // `content:` named for the same reason as `signatureSection` below:
+            // the closure ends in a `if let` with no `else`, which would make
+            // the following `} header:` ambiguous to the parser.
+            Section(content: {
                 Picker("签名证书", selection: Binding(
                     get: { certificates.selectedID ?? fallbackCertificateID },
                     set: { certificates.select($0) }
@@ -284,18 +294,17 @@ struct GuestDetailView: View {
                             .tag(certificate.id as UUID?)
                     }
                 }
-                if let selected = certificates.selected, !selected.isUsable {
-                    if let reason = selected.unusableReason {
-                        Text(reason)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.orange)
-                    }
+                if let selected = certificates.selected, !selected.isUsable,
+                   let reason = selected.unusableReason {
+                    Text(reason)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
                 }
-            } header: {
+            }, header: {
                 Text("签名身份")
-            } footer: {
+            }, footer: {
                 Text("在「设置 → 管理签名证书」中导入或删除证书。不可用的证书会自动回退为 adhoc 签名。")
-            }
+            })
         }
     }
 
